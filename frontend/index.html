@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CVE Justification Assistant</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="inner">
+      <h1>CVE Justification Assistant</h1>
+      <p>Upload a Trivy scan report and describe your environment to get per-CVE justifications and remediation guidance.</p>
+    </div>
+  </header>
+
+  <main>
+    <div class="error-banner hidden" id="error-banner"></div>
+
+    <section class="panel">
+      <form id="scan-form">
+        <div class="field">
+          <label for="scan-file">Trivy scan report</label>
+          <input type="file" id="scan-file" name="scan-file" accept=".xlsx,.xls,.csv" />
+          <span class="hint">Excel or CSV export of a Trivy image scan (.xlsx, .xls, .csv).</span>
+        </div>
+
+        <div class="field">
+          <label for="architecture-context">Architecture / infrastructure description</label>
+          <textarea id="architecture-context" name="architecture-context" placeholder="Describe your environment: network topology, exposure, compensating controls, runtime, base images, anything relevant to assessing risk. The more detail, the better the justification quality."></textarea>
+          <span class="hint">Optional, but more detail leads to better justifications.</span>
+        </div>
+
+        <div class="actions">
+          <button type="submit" id="submit-btn">Submit</button>
+          <span class="spinner" id="spinner" aria-hidden="true"></span>
+          <span id="status-text" class="hint"></span>
+        </div>
+      </form>
+    </section>
+
+    <section class="result-section hidden panel" id="result-section">
+      <div class="actions">
+        <button type="button" id="download-btn" disabled>Download CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table id="result-table"></table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>ibm-security-control-tower &mdash; frontend</p>
+  </footer>
+
+  <script src="vendor/xlsx.full.min.js"></script>
+  <script src="js/util.js"></script>
+  <script src="js/fileParse.js"></script>
+  <script src="js/mockApi.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/resultTable.js"></script>
+  <script src="js/upload.js"></script>
+</body>
+</html>
