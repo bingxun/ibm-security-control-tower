@@ -1,0 +1,11 @@
+ui/
+.venv/
+.next/
+node_modules/
+__pycache__/
+*.pyc
+.env
+.git/
+data/
+*.db
+*.log

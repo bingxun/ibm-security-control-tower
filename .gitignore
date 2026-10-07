@@ -1,0 +1,37 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Data / DB (runtime generated)
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+
+# Next.js
+ui/.next/
+ui/node_modules/
+ui/.env.local
+
+# macOS
+.DS_Store
+
+# Bob IDE
+.bob/
+
+# Trivy cache
+trivy-cache/
