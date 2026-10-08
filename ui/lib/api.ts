@@ -99,6 +99,7 @@ export interface DashboardStats {
   avgApprovalRate: number;
   ragDecisions: number;
   ragFirstPassRate: number;
+  autoApproved: number;
 }
 
 export interface DecisionPayload {

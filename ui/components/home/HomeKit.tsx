@@ -108,6 +108,42 @@ export function StatGrid({ children, cols = 4 }: { children: ReactNode; cols?: 3
   return <div className={`grid gap-4 ${cols === 3 ? "grid-cols-3" : "grid-cols-4"}`}>{children}</div>;
 }
 
+// ── Agent impact: quantifies what the autonomous triage saved ────────────────
+export function AgentImpact({ autoApproved }: { autoApproved: number }) {
+  if (!autoApproved) return null;
+  const mins = autoApproved * 6; // ~6 min of human review saved per finding
+  const saved = mins >= 60 ? `${(mins / 60).toFixed(1)} hrs` : `${mins} min`;
+  return (
+    <div
+      className="rounded-2xl px-6 py-5 flex items-center gap-6 flex-wrap ct-fade-up"
+      style={{
+        background: "linear-gradient(135deg, rgba(176,131,255,0.14), rgba(88,166,255,0.07))",
+        border: "1px solid var(--accent-purple-bdr)", boxShadow: "var(--shadow-card)",
+      }}
+    >
+      <span className="grid place-items-center w-11 h-11 rounded-2xl flex-shrink-0"
+        style={{ background: "var(--accent-purple-bg)", color: "var(--accent-purple)", border: "1px solid var(--accent-purple-bdr)" }}>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
+      </span>
+      <div>
+        <div className="text-[11px] font-bold uppercase tracking-wider mb-0.5" style={{ color: "var(--accent-purple)" }}>Agent impact</div>
+        <div className="flex items-baseline gap-2.5 flex-wrap">
+          <span className="text-[26px] font-black leading-none tabular-nums" style={{ color: "var(--heading)" }}>{autoApproved}</span>
+          <span className="text-[13px]" style={{ color: "var(--subtle)" }}>findings auto-approved from published baselines</span>
+        </div>
+      </div>
+      <div className="w-px h-10 hidden sm:block" style={{ background: "var(--accent-purple-bdr)" }} />
+      <div>
+        <div className="flex items-baseline gap-2">
+          <span className="text-[22px] font-black leading-none" style={{ color: "var(--accent-green)" }}>~{saved}</span>
+          <span className="text-[13px]" style={{ color: "var(--subtle)" }}>of manual review saved</span>
+        </div>
+      </div>
+      <span className="ml-auto text-[11px] hidden md:block" style={{ color: "var(--muted)" }}>Autonomous · exact CVE match · fully audited</span>
+    </div>
+  );
+}
+
 // ── Security posture: severity distribution + review funnel ───────────────────
 const SEV_DEF = [
   { key: "critical", label: "Critical", color: "var(--accent-red)" },

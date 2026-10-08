@@ -10,7 +10,7 @@ import {
 } from "@/lib/api";
 import {
   HomeShell, Hero, PrimaryLink, SecondaryLink, PlusIcon, ReviewIcon,
-  StatCard, StatGrid, SectionTitle, ActionTile, ProjectGrid, RagCallout, NoProjects, PostureCard,
+  StatCard, StatGrid, SectionTitle, ActionTile, ProjectGrid, RagCallout, NoProjects, PostureCard, AgentImpact,
   awaitingReview, inProgress, pending, needsMyAction, changesRequested,
 } from "./HomeKit";
 
@@ -19,7 +19,7 @@ const ClockKpi  = <svg width="15" height="15" viewBox="0 0 24 24" fill="none" st
 const BugKpi    = <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 2l1.5 1.5M16 2l-1.5 1.5"/><rect x="8" y="6" width="8" height="12" rx="4"/><path d="M8 10H4M20 10h-4M8 14H4M20 14h-4M12 18v3"/></svg>;
 const CheckKpi  = <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>;
 
-const EMPTY: DashboardStats = { totalScans: 0, cvesTriaged: 0, avgApprovalRate: 0, ragDecisions: 0, ragFirstPassRate: 0 };
+const EMPTY: DashboardStats = { totalScans: 0, cvesTriaged: 0, avgApprovalRate: 0, ragDecisions: 0, ragFirstPassRate: 0, autoApproved: 0 };
 
 const UsersIcon = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>;
 const ProjIcon = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>;
@@ -96,6 +96,9 @@ export default function Home() {
         <StatCard value={String(stats.cvesTriaged)} label="CVEs triaged" sub="across scans" color="var(--accent-purple)" icon={BugKpi} />
         <StatCard value={`${stats.avgApprovalRate}%`} label="Avg. approval rate" sub="first-pass" color={approvalColor} icon={CheckKpi} />
       </StatGrid>
+
+      {/* Agent impact — what the autonomous triage saved */}
+      <AgentImpact autoApproved={stats.autoApproved} />
 
       {/* Security posture — severity distribution + review progress */}
       {scans.length > 0 && <PostureCard scans={scans} />}

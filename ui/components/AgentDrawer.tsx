@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { AgentStep } from "@/lib/types";
 
 interface Props {
@@ -16,6 +16,7 @@ const STAGES = [
   { prefix: "master", label: "Master" },
   { prefix: "rag",     label: "Memory slave",  },
   { prefix: "draft",   label: "Assessment slave",   },
+  { prefix: "auto-triage", label: "Auto-triage" },
   { prefix: "approval",label: "Approval",},
   { prefix: "persist", label: "Persist", },
 ];
@@ -29,7 +30,26 @@ const CHIP_STYLE: Record<string, { bg: string; color: string }> = {
 };
 
 export default function AgentDrawer({ steps, tokenFragment }: Props) {
-  const [open, setOpen] = useState(false);
+  // Open by default — the agent's reasoning trace is a headline feature, not a footnote.
+  const [open, setOpen] = useState(true);
+
+  // Progressive reveal — the trace "streams in" step-by-step so it reads as the
+  // agent thinking live (works whether steps arrive via SSE or are replayed).
+  const [revealed, setRevealed] = useState(0);
+  const lenRef = useRef(0);
+  useEffect(() => { lenRef.current = steps.length; }, [steps.length]);
+  useEffect(() => {
+    const id = setInterval(() => {
+      setRevealed((r) => {
+        const len = lenRef.current;
+        if (r >= len) return r;
+        return Math.min(r + Math.max(1, Math.ceil(len / 40)), len); // ~finish in <12s even for big traces
+      });
+    }, 280);
+    return () => clearInterval(id);
+  }, []);
+  const shown = steps.slice(0, revealed);
+  const streaming = revealed < steps.length;
 
   // Match a stage prefix against step IDs (handles dynamic IDs like "rag-CVE-2024-3094")
   const stageState = (prefix: string): "done" | "active" | "waiting" => {
@@ -89,8 +109,8 @@ export default function AgentDrawer({ steps, tokenFragment }: Props) {
           })}
         </div>
 
-        <span className="text-[11px]" style={{ color: "var(--muted)" }}>
-          How the agent got here
+        <span className="text-[11px] font-semibold flex-shrink-0" style={{ color: "var(--accent-purple)" }}>
+          ◈ Agent reasoning{steps.length ? ` · ${steps.length} steps` : ""}
         </span>
         <span
           className="text-[12px] transition-transform duration-200 inline-block"
@@ -106,10 +126,30 @@ export default function AgentDrawer({ steps, tokenFragment }: Props) {
       {/* Expanded body */}
       {open && (
         <div className="p-5 flex flex-col gap-4">
+          {/* Stream controls */}
+          <div className="flex items-center gap-2">
+            {streaming ? (
+              <span className="flex items-center gap-2 text-[11px] font-semibold" style={{ color: "var(--accent-purple)" }}>
+                <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--accent-purple)", boxShadow: "0 0 6px var(--accent-purple-glow)" }} />
+                Streaming agent reasoning… {revealed}/{steps.length}
+              </span>
+            ) : (
+              <span className="text-[11px]" style={{ color: "var(--muted)" }}>Trace complete · {steps.length} steps</span>
+            )}
+            <button
+              onClick={() => setRevealed(0)}
+              className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-opacity hover:opacity-80"
+              style={{ background: "var(--accent-purple-bg)", color: "var(--accent-purple)", border: "1px solid var(--accent-purple-bdr)" }}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M3 2v6h6" /><path d="M3 13a9 9 0 1 0 3-7.7L3 8" /></svg>
+              Replay
+            </button>
+          </div>
+
           {/* Timeline steps */}
           <div className="flex flex-col gap-0">
-            {steps.map((step, i) => (
-              <div key={step.id} className="flex gap-4">
+            {shown.map((step, i) => (
+              <div key={step.id} className="flex gap-4 ct-fade-up">
                 {/* Timeline line */}
                 <div className="flex flex-col items-center">
                   <div
@@ -124,7 +164,7 @@ export default function AgentDrawer({ steps, tokenFragment }: Props) {
                   >
                     {step.state === "done" ? "✓" : step.state === "active" ? "●" : i + 1}
                   </div>
-                  {i < steps.length - 1 && (
+                  {i < shown.length - 1 && (
                     <div
                       className="w-px flex-1 my-1"
                       style={{
