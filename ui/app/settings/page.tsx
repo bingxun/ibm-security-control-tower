@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import TopNav from "@/components/TopNav";
+import RequireAuth from "@/components/RequireAuth";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -919,7 +920,7 @@ const SECTION_COMPONENTS: Record<Section, React.ComponentType> = {
   danger: DangerSection,
 };
 
-export default function SettingsPage() {
+function SettingsPageInner() {
   const [active, setActive] = useState<Section>("watsonx");
   const ActiveSection = SECTION_COMPONENTS[active];
 
@@ -974,5 +975,13 @@ export default function SettingsPage() {
         </main>
       </div>
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <RequireAuth permission="canViewSettings">
+      <SettingsPageInner />
+    </RequireAuth>
   );
 }

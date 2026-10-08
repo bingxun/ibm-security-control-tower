@@ -4,6 +4,8 @@ import { useState } from "react";
 import { CveRecord } from "@/lib/types";
 import { AgentStep } from "@/lib/types";
 import AgentDrawer from "./AgentDrawer";
+import { usePermission, useAuth } from "@/lib/auth";
+import { ROLE_LABELS } from "@/lib/types";
 
 interface Props {
   cve: CveRecord;
@@ -152,6 +154,8 @@ export default function CveReview({
   onDecision,
 }: Props) {
   const [editOpen, setEditOpen] = useState(false);
+  const canApprove  = usePermission("canApprove");
+  const { user }    = useAuth();
 
   const sevColor = SEV_COLOR[cve.severity] ?? "var(--faint)";
   const cvssColor =
@@ -374,54 +378,70 @@ export default function CveReview({
             className="flex items-center gap-3 px-6 py-5"
             style={{ borderTop: "1px solid var(--border)", background: "var(--surface3)" }}
           >
-            {/* Primary — Accept */}
-            <button
-              onClick={() => onDecision(cve.id, "approved")}
-              className="flex items-center gap-2 px-8 py-3 rounded-xl text-[14px] font-bold transition-all duration-150 hover:opacity-90 active:scale-[0.98]"
-              style={{
-                background: "var(--btn-accept-bg)",
-                color: "var(--btn-accept-text)",
-                boxShadow: "0 0 20px var(--btn-accept-glow)",
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-              Accept
-            </button>
+            {canApprove ? (
+              <>
+                {/* Primary — Accept */}
+                <button
+                  onClick={() => onDecision(cve.id, "approved")}
+                  className="flex items-center gap-2 px-8 py-3 rounded-xl text-[14px] font-bold transition-all duration-150 hover:opacity-90 active:scale-[0.98]"
+                  style={{
+                    background: "var(--btn-accept-bg)",
+                    color: "var(--btn-accept-text)",
+                    boxShadow: "0 0 20px var(--btn-accept-glow)",
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                  Accept
+                </button>
 
-            {/* Secondary — Edit */}
-            <button
-              onClick={() => setEditOpen(true)}
-              className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all duration-150 hover:opacity-80"
-              style={{
-                background: "var(--surface2)",
-                color: "var(--faint)",
-                border: "1px solid var(--border2)",
-              }}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </svg>
-              Edit
-            </button>
+                {/* Secondary — Edit */}
+                <button
+                  onClick={() => setEditOpen(true)}
+                  className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all duration-150 hover:opacity-80"
+                  style={{
+                    background: "var(--surface2)",
+                    color: "var(--faint)",
+                    border: "1px solid var(--border2)",
+                  }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                  </svg>
+                  Edit
+                </button>
 
-            {/* Danger — Reject */}
-            <button
-              onClick={() => onDecision(cve.id, "rejected")}
-              className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all duration-150 hover:opacity-80"
-              style={{
-                background: "var(--accent-red-bg)",
-                color: "var(--accent-red)",
-                border: "1px solid var(--accent-red-bdr)",
-              }}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
-              Reject
-            </button>
+                {/* Danger — Reject */}
+                <button
+                  onClick={() => onDecision(cve.id, "rejected")}
+                  className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all duration-150 hover:opacity-80"
+                  style={{
+                    background: "var(--accent-red-bg)",
+                    color: "var(--accent-red)",
+                    border: "1px solid var(--accent-red-bdr)",
+                  }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                  Reject
+                </button>
+              </>
+            ) : (
+              /* Read-only notice for non-approvers */
+              <div
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px]"
+                style={{ background: "var(--accent-yellow-bg, rgba(210,153,34,0.08))", border: "1px solid rgba(210,153,34,0.2)", color: "var(--accent-yellow)" }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+                Read-only — your role ({user ? ROLE_LABELS[user.role] : "current role"}) cannot approve or reject CVEs. A Cyber Manager must review this finding.
+              </div>
+            )}
 
             {/* Progress indicator */}
             <div className="ml-auto flex items-center gap-3">

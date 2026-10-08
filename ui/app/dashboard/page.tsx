@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
+import RequireAuth from "@/components/RequireAuth";
 import { listScans, getDashboardStats, ScanSummary, DashboardStats } from "@/lib/api";
 
 function SevBadge({ label, count, color }: { label: string; count: number; color: string }) {
@@ -48,7 +49,7 @@ const EMPTY_STATS: DashboardStats = {
   ragFirstPassRate: 0,
 };
 
-export default function DashboardPage() {
+function DashboardPageInner() {
   const [scans, setScans] = useState<ScanSummary[]>([]);
   const [dashStats, setDashStats] = useState<DashboardStats>(EMPTY_STATS);
   const [loading, setLoading] = useState(true);
@@ -352,5 +353,13 @@ export default function DashboardPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <RequireAuth>
+      <DashboardPageInner />
+    </RequireAuth>
   );
 }

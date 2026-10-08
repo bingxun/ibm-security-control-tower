@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import TopNav from "@/components/TopNav";
+import RequireAuth from "@/components/RequireAuth";
 import CveQueue from "@/components/CveQueue";
 import CveReview from "@/components/CveReview";
 import ContextPanel from "@/components/ContextPanel";
@@ -481,8 +482,10 @@ function ReviewPageInner() {
 // ── Export with Suspense boundary for useSearchParams ─────────────────────
 export default function ReviewPage() {
   return (
-    <Suspense>
-      <ReviewPageInner />
-    </Suspense>
+    <RequireAuth>
+      <Suspense>
+        <ReviewPageInner />
+      </Suspense>
+    </RequireAuth>
   );
 }

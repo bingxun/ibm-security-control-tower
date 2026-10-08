@@ -1,7 +1,9 @@
 "use client";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import ThemeSwitcher from "./ThemeSwitcher";
+import { useAuth } from "@/lib/auth";
+import { ROLE_LABELS, ROLE_COLORS } from "@/lib/types";
 
 interface Props {
   agentStatus?: "running" | "awaiting" | "done" | "error";
@@ -10,11 +12,22 @@ interface Props {
 }
 
 export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
-  const path = usePathname();
+  const path       = usePathname();
+  const router     = useRouter();
+  const { user, permissions, logout } = useAuth();
+
   const isReview    = path?.startsWith("/review");
   const isNewScan   = path?.startsWith("/new-scan");
   const isDashboard = path?.startsWith("/dashboard");
   const isSettings  = path?.startsWith("/settings");
+
+  const handleLogout = () => {
+    logout();
+    router.replace("/login");
+  };
+
+  const roleColors = user ? ROLE_COLORS[user.role] : null;
+
   return (
     <nav
       className="h-14 flex items-center px-6 gap-4 flex-shrink-0"
@@ -93,8 +106,8 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
 
       <div className="flex-1" />
 
-      {/* New scan CTA — dashboard + review */}
-      {(isReview || isDashboard) && (
+      {/* New scan CTA — only for users who can scan */}
+      {(isReview || isDashboard) && permissions?.canScan && (
         <Link
           href="/new-scan"
           className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-[12px] font-semibold transition-opacity hover:opacity-80"
@@ -111,8 +124,8 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
         </Link>
       )}
 
-      {/* Settings gear — all pages except settings itself */}
-      {!isSettings && (
+      {/* Settings gear — only for users who can view settings */}
+      {!isSettings && permissions?.canViewSettings && (
         <Link
           href="/settings"
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-opacity hover:opacity-80"
@@ -121,7 +134,7 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
             border: "1px solid var(--border)",
             color: "var(--faint)",
           }}
-          title="Admin Settings"
+          title="Settings"
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             <circle cx="12" cy="12" r="3"/>
@@ -156,19 +169,46 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
         );
       })()}
 
-      {/* User */}
-      <div className="flex items-center gap-2.5">
-        <div className="text-right">
-          <div className="text-[12px] font-medium" style={{ color: "var(--body)" }}>Auth Lead</div>
-          <div className="text-[11px]" style={{ color: "var(--muted)" }}>Authority Reviewer</div>
+      {/* User chip + logout */}
+      {user && roleColors && (
+        <div className="flex items-center gap-2">
+          {/* Role badge */}
+          <span
+            className="text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wide hidden sm:inline"
+            style={{ background: roleColors.bg, color: roleColors.text, border: `1px solid ${roleColors.border}` }}
+          >
+            {ROLE_LABELS[user.role]}
+          </span>
+
+          {/* Name + avatar */}
+          <div className="flex items-center gap-2">
+            <div className="text-right hidden md:block">
+              <div className="text-[12px] font-medium leading-none" style={{ color: "var(--body)" }}>{user.name}</div>
+              <div className="text-[11px] leading-none mt-0.5" style={{ color: "var(--muted)" }}>{user.email}</div>
+            </div>
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-bold text-white flex-shrink-0"
+              style={{ background: "linear-gradient(135deg, #4493f8, #7c5cd8)" }}
+            >
+              {user.avatarInitials}
+            </div>
+          </div>
+
+          {/* Logout */}
+          <button
+            onClick={handleLogout}
+            title="Sign out"
+            className="flex items-center justify-center w-8 h-8 rounded-lg transition-opacity hover:opacity-70"
+            style={{ background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--muted)" }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+              <polyline points="16 17 21 12 16 7"/>
+              <line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
+          </button>
         </div>
-        <div
-          className="w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-bold text-white flex-shrink-0"
-          style={{ background: "linear-gradient(135deg, #4493f8, #7c5cd8)" }}
-        >
-          AL
-        </div>
-      </div>
+      )}
     </nav>
   );
 }
