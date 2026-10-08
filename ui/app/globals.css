@@ -1,0 +1,153 @@
+@import "tailwindcss";
+
+/* ── Shared semantic tokens (referenced by components via var()) ── */
+:root,
+[data-theme="dark"] {
+  --bg:           #080b10;
+  --bg-nav:       #0d1117;
+  --surface:      #0d1117;
+  --surface2:     #161b22;
+  --surface3:     #0a0d12;
+  --border:       #1e2530;
+  --border2:      #2a3441;
+  --dim:          #30363d;
+  --muted:        #4d5566;
+  --subtle:       #6e7681;
+  --faint:        #8b949e;
+  --body:         #c9d1d9;
+  --heading:      #e6edf3;
+
+  --accent-green:     #3fb950;
+  --accent-green-bg:  rgba(63,185,80,0.08);
+  --accent-green-bdr: rgba(63,185,80,0.15);
+
+  --accent-red:       #f85149;
+  --accent-red-bg:    rgba(248,81,73,0.08);
+  --accent-red-bdr:   rgba(248,81,73,0.25);
+
+  --accent-orange:    #f0883e;
+  --accent-yellow:    #d29922;
+  --accent-blue:      #4493f8;
+  --accent-blue-bg:   rgba(68,147,248,0.1);
+
+  --accent-purple:       #a371f7;
+  --accent-purple-bg:    rgba(163,113,247,0.08);
+  --accent-purple-bdr:   rgba(163,113,247,0.18);
+  --accent-purple-glow:  rgba(163,113,247,0.6);
+
+  --btn-accept-bg:     #238636;
+  --btn-accept-glow:   rgba(35,134,54,0.3);
+  --btn-accept-text:   #ffffff;
+
+  --shadow-card: none;
+}
+
+[data-theme="light"] {
+  --bg:           #f0f2f5;
+  --bg-nav:       #ffffff;
+  --surface:      #ffffff;
+  --surface2:     #f6f8fa;
+  --surface3:     #eef0f3;
+  --border:       #d0d7de;
+  --border2:      #c6cdd4;
+  --dim:          #bcc3cb;
+  --muted:        #768390;
+  --subtle:       #57606a;
+  --faint:        #424a53;
+  --body:         #24292f;
+  --heading:      #0d1117;
+
+  --accent-green:     #1a7f37;
+  --accent-green-bg:  rgba(26,127,55,0.08);
+  --accent-green-bdr: rgba(26,127,55,0.2);
+
+  --accent-red:       #cf222e;
+  --accent-red-bg:    rgba(207,34,46,0.06);
+  --accent-red-bdr:   rgba(207,34,46,0.2);
+
+  --accent-orange:    #bc4c00;
+  --accent-yellow:    #9a6700;
+  --accent-blue:      #0969da;
+  --accent-blue-bg:   rgba(9,105,218,0.08);
+
+  --accent-purple:       #8250df;
+  --accent-purple-bg:    rgba(130,80,223,0.06);
+  --accent-purple-bdr:   rgba(130,80,223,0.15);
+  --accent-purple-glow:  rgba(130,80,223,0.3);
+
+  --btn-accept-bg:     #1a7f37;
+  --btn-accept-glow:   rgba(26,127,55,0.25);
+  --btn-accept-text:   #ffffff;
+
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+}
+
+[data-theme="hc"] {
+  --bg:           #000000;
+  --bg-nav:       #000000;
+  --surface:      #0a0a0a;
+  --surface2:     #111111;
+  --surface3:     #050505;
+  --border:       #444444;
+  --border2:      #666666;
+  --dim:          #555555;
+  --muted:        #888888;
+  --subtle:       #aaaaaa;
+  --faint:        #cccccc;
+  --body:         #eeeeee;
+  --heading:      #ffffff;
+
+  --accent-green:     #00ff41;
+  --accent-green-bg:  rgba(0,255,65,0.08);
+  --accent-green-bdr: rgba(0,255,65,0.3);
+
+  --accent-red:       #ff4444;
+  --accent-red-bg:    rgba(255,68,68,0.08);
+  --accent-red-bdr:   rgba(255,68,68,0.4);
+
+  --accent-orange:    #ff8800;
+  --accent-yellow:    #ffcc00;
+  --accent-blue:      #4499ff;
+  --accent-blue-bg:   rgba(68,153,255,0.1);
+
+  --accent-purple:       #cc88ff;
+  --accent-purple-bg:    rgba(204,136,255,0.08);
+  --accent-purple-bdr:   rgba(204,136,255,0.3);
+  --accent-purple-glow:  rgba(204,136,255,0.7);
+
+  --btn-accept-bg:     #00ff41;
+  --btn-accept-glow:   rgba(0,255,65,0.4);
+  --btn-accept-text:   #000000;
+
+  --shadow-card: 0 0 0 1px #444;
+}
+
+/* ── Tailwind v4 design tokens ── */
+@theme {
+  --color-bg:      var(--bg);
+  --color-surface: var(--surface);
+  --color-border:  var(--border);
+  --color-heading: var(--heading);
+  --color-body:    var(--body);
+  --font-family-mono: "SF Mono", "Fira Code", "Consolas", monospace;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--bg);
+  color: var(--heading);
+  transition: background-color 0.2s, color 0.2s;
+}
+
+/* Theme transition for all elements */
+*, *::before, *::after {
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+/* Suppress transition on interactive elements to avoid lag */
+button, input, select { transition: opacity 0.15s, transform 0.1s !important; }
+
+::-webkit-scrollbar        { width: 4px; height: 4px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: var(--dim); border-radius: 2px; }
