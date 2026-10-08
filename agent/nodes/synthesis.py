@@ -2,10 +2,13 @@
 Node 02 — Context Synthesis
 For each CVE:
   1. Query RAG memory for similar past decisions
-  2. Call the Bob MCP server (synthesise_cve tool) to generate a mitigation rationale
-  3. Falls back to an offline stub if the MCP server is unreachable
+  2. Call IBM RAD gateway (Anthropic-compatible) to generate a mitigation rationale
+  3. Falls back to an offline stub if the gateway is unreachable
 
-No watsonx API key required — Bob's LLM handles generation.
+Set env vars:
+  ANTHROPIC_BASE_URL   = https://llm.ibm-rad.com   (or any LiteLLM gateway)
+  ANTHROPIC_AUTH_TOKEN = sk-...                     (your RAD usage key)
+  RAD_MODEL            = claude-3-5-sonnet-20241022 (optional, default below)
 """
 from __future__ import annotations
 
@@ -13,7 +16,6 @@ import json
 import logging
 import os
 import time
-import urllib.error
 import urllib.request
 from typing import Any
 
@@ -22,95 +24,98 @@ from rag.store import query_memory
 
 logger = logging.getLogger("control_tower")
 
-MCP_URL  = os.getenv("MCP_URL", "http://localhost:8001/mcp")
-MCP_TIMEOUT = int(os.getenv("MCP_TIMEOUT", "30"))   # seconds per CVE
+# ── IBM RAD / Anthropic gateway config ────────────────────────────────────
+RAD_BASE_URL = os.getenv("ANTHROPIC_BASE_URL", "https://llm.ibm-rad.com")
+RAD_AUTH_TOKEN = os.getenv("ANTHROPIC_AUTH_TOKEN", "")
+RAD_MODEL    = os.getenv("RAD_MODEL", "global.anthropic.claude-sonnet-4-6")
+RAD_TIMEOUT  = int(os.getenv("RAD_TIMEOUT", "60"))   # seconds per CVE
 
 
-# ── MCP client ─────────────────────────────────────────────────────────────
+# ── Anthropic messages API client ──────────────────────────────────────────
 
-def _mcp_post(url: str, payload: bytes, headers: dict) -> tuple[str, dict]:
-    """POST to MCP, return (raw_body, response_headers_dict)."""
-    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-    with urllib.request.urlopen(req, timeout=MCP_TIMEOUT) as resp:
-        return resp.read().decode(), dict(resp.headers)
-
-
-def _parse_sse(raw: str) -> str:
-    """Extract the JSON body from an SSE envelope (data: {...})."""
-    for line in raw.splitlines():
-        if line.startswith("data:"):
-            return line[len("data:"):].strip()
-    return raw
-
-
-def _mcp_call(tool: str, arguments: dict[str, Any]) -> Any:
+def _rad_generate(prompt: str) -> str:
     """
-    Call a tool on the MCP server using the streamable-HTTP transport.
-    Handles the initialize → tools/call session flow.
+    Call the IBM RAD gateway (Anthropic-compatible /v1/messages endpoint).
+    Returns the generated text, or raises on error.
     """
-    base_headers = {
-        "Content-Type": "application/json",
-        "Accept":       "application/json, text/event-stream",
-    }
+    url = f"{RAD_BASE_URL.rstrip('/')}/v1/messages"
 
-    # 1. Initialize session
-    init_payload = json.dumps({
-        "jsonrpc": "2.0", "id": 0, "method": "initialize",
-        "params": {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "control-tower", "version": "1.0"},
+    payload = json.dumps({
+        "model":      RAD_MODEL,
+        "max_tokens": 300,
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+    }).encode()
+
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Content-Type":      "application/json",
+            "x-api-key":         RAD_AUTH_TOKEN,
+            "anthropic-version": "2023-06-01",
         },
-    }).encode()
-    _, init_headers = _mcp_post(MCP_URL, init_payload, base_headers)
-    session_id = init_headers.get("mcp-session-id", "")
-    if not session_id:
-        raise RuntimeError("MCP server did not return a session ID")
+        method="POST",
+    )
 
-    # 2. Call the tool
-    call_headers = {**base_headers, "mcp-session-id": session_id}
-    call_payload = json.dumps({
-        "jsonrpc": "2.0", "id": 1,
-        "method": "tools/call",
-        "params": {"name": tool, "arguments": arguments},
-    }).encode()
-    raw, _ = _mcp_post(MCP_URL, call_payload, call_headers)
+    with urllib.request.urlopen(req, timeout=RAD_TIMEOUT) as resp:
+        body = json.loads(resp.read().decode())
 
-    body   = _parse_sse(raw)
-    result = json.loads(body)
+    # Anthropic response: body["content"][0]["text"]
+    content = body.get("content", [])
+    if content and content[0].get("type") == "text":
+        return content[0]["text"].strip()
 
-    if "error" in result:
-        raise RuntimeError(f"MCP error: {result['error']}")
+    raise RuntimeError(f"Unexpected RAD response: {body}")
 
-    content = result.get("result", {}).get("content", [])
-    for block in content:
-        if block.get("type") == "text":
-            try:
-                return json.loads(block["text"])
-            except json.JSONDecodeError:
-                return {"rationale": block["text"], "source": "bob"}
 
-    raise RuntimeError("Empty MCP response")
+# ── Prompt builder ─────────────────────────────────────────────────────────
+
+def _build_prompt(cve: dict, hits: list[dict], project_id: str, cis_profile: str) -> str:
+    prior = ""
+    if hits:
+        top = hits[0]
+        prior = (
+            f"\n\nPRIOR DECISION (similarity {top['score']}% — project {top['project_id']}, "
+            f"approved by {top['approver']}):\n{top['rationale']}"
+        )
+
+    return f"""You are a cloud security architect at IBM. Write a concise, technical mitigation rationale for the following container vulnerability finding.
+
+The rationale MUST:
+- State whether the vulnerability is exploitable given typical cloud network controls
+- Specify a concrete remediation action (patch version, config change, or accepted risk)
+- Reference the CIS profile and project context
+- Be 2-3 sentences maximum
+- Use precise technical language suitable for a CSA Tier 1 security report
+
+PROJECT: {project_id}
+CIS PROFILE: {cis_profile}
+CVE ID: {cve['id']}
+PACKAGE: {cve['pkg']} {cve['version']} (fix: {cve.get('fixed_in','N/A')})
+SEVERITY: {cve['severity'].upper()} (CVSS {cve.get('cvss', 0)})
+ATTACK VECTOR: {cve.get('vector','Network')}
+IMPACT: {cve.get('impact','')}
+DESCRIPTION: {cve.get('description','')}{prior}
+
+Write the mitigation rationale now (2-3 sentences only):"""
 
 
 # ── Offline stub ────────────────────────────────────────────────────────────
 
 def _stub_rationale(cve: dict) -> str:
-    """
-    Plain-English fallback when the MCP server is unreachable.
-    Built entirely from CVE fields — no network call needed.
-    """
-    sev   = cve["severity"].upper()
-    cvss  = cve["cvss"]
-    pkg   = cve["pkg"]
-    ver   = cve["version"]
-    fix   = cve["fixed_in"] or "the latest patched release"
-    vec   = cve.get("vector", "Network")
-    title = cve.get("impact", "") or cve.get("description", "")[:80]
+    """Plain-English fallback when the RAD gateway is unreachable."""
+    sev  = cve["severity"].upper()
+    pkg  = cve["pkg"]
+    ver  = cve["version"]
+    fix  = cve.get("fixed_in") or "the latest patched release"
+    vec  = cve.get("vector", "Network")
+    desc = cve.get("impact", "") or cve.get("description", "")[:80]
     return (
-        f"{cve['id']} is a {sev}-severity vulnerability (CVSS {cvss}) in {pkg} {ver} "
-        f"with a {vec.lower()} attack vector. "
-        f"{title + '. ' if title else ''}"
+        f"{cve['id']} is a {sev}-severity vulnerability (CVSS {cve.get('cvss',0)}) "
+        f"in {pkg} {ver} with a {vec.lower()} attack vector. "
+        f"{desc + '. ' if desc else ''}"
         f"Recommended remediation: upgrade {pkg} to {fix}. "
         f"Review exploitability against this project's network controls before approving."
     )
@@ -120,18 +125,18 @@ def _stub_rationale(cve: dict) -> str:
 
 def synthesis_node(state: AgentState) -> dict:
     """
-    LangGraph node: synthesise rationale for every queued CVE via Bob MCP.
-    Processes all CVEs in one pass. Falls back to offline stub if MCP unavailable.
+    LangGraph node: synthesise rationale for every queued CVE.
+    Calls the IBM RAD gateway (Anthropic-compatible). Falls back to offline stub.
     """
     cves        = [dict(c) for c in state["cves"]]
     project_id  = state.get("project_id", "UNKNOWN")
     cis_profile = state.get("cis_profile", "CIS Level 1")
 
-    steps: list[AgentStep]     = list(state.get("agent_steps", []))
-    total_tokens: int          = state.get("tokens_used", 0)
-    rag_hit_count: int         = state.get("rag_hits", 0)
+    steps: list[AgentStep]       = list(state.get("agent_steps", []))
+    total_tokens: int            = state.get("tokens_used", 0)
+    rag_hit_count: int           = state.get("rag_hits", 0)
     synthesis_times: list[float] = []
-    last_fragment              = ""
+    last_fragment                = ""
 
     for i, cve in enumerate(cves):
         if cve["status"] not in ("queued",):
@@ -157,11 +162,10 @@ def synthesis_node(state: AgentState) -> dict:
             }
 
         rag_chips = [{"label": "◈ query_memory", "variant": "rag"}]
-        rag_chips.append({
-            "label":   f"{len(hits)} hit{'s' if len(hits) > 1 else ''}",
-            "variant": "done",
-        } if hits else {"label": "no prior match", "variant": "stream"})
-
+        rag_chips.append(
+            {"label": f"{len(hits)} hit{'s' if len(hits) > 1 else ''}", "variant": "done"}
+            if hits else {"label": "no prior match", "variant": "stream"}
+        )
         steps.append(AgentStep(
             id=f"rag-{cve['id']}",
             title=f"Memory search — {cve['id']}",
@@ -170,56 +174,43 @@ def synthesis_node(state: AgentState) -> dict:
             state="done",
         ))
 
-        # ── 2. Bob MCP synthesis ────────────────────────────────────────────
+        # ── 2. IBM RAD generation ───────────────────────────────────────────
         rationale = ""
         source    = "stub"
 
-        top_hit = hits[0] if hits else {}
-        mcp_args = {
-            "cve_id":          cve["id"],
-            "severity":        cve["severity"],
-            "pkg":             cve["pkg"],
-            "version":         cve["version"],
-            "fixed_in":        cve.get("fixed_in", ""),
-            "cvss":            cve.get("cvss", 0.0),
-            "vector":          cve.get("vector", "Network"),
-            "description":     cve.get("description", ""),
-            "impact":          cve.get("impact", ""),
-            "project_id":      project_id,
-            "cis_profile":     cis_profile,
-            "prior_rationale": top_hit.get("rationale", ""),
-            "prior_project":   top_hit.get("project_id", ""),
-            "prior_approver":  top_hit.get("approver", ""),
-        }
-
-        try:
-            result   = _mcp_call("synthesise_cve", mcp_args)
-            rationale = result.get("rationale", "")
-            source    = result.get("source", "bob")
-        except Exception as e:
-            logger.warning("MCP synthesise_cve failed for %s (%s) — using stub", cve["id"], e)
+        if RAD_AUTH_TOKEN:
+            try:
+                prompt    = _build_prompt(cve, hits, project_id, cis_profile)
+                rationale = _rad_generate(prompt)
+                source    = "rad"
+                # rough token estimate
+                total_tokens += len(prompt.split()) + len(rationale.split())
+            except Exception as e:
+                logger.warning("RAD gateway failed for %s (%s) — using stub", cve["id"], e)
+        else:
+            logger.info("ANTHROPIC_AUTH_TOKEN not set — using stub for %s", cve["id"])
 
         if not rationale:
             rationale = _stub_rationale(cve)
             source    = "stub"
 
-        last_fragment          = rationale
-        cves[i]["rationale"]   = rationale
-        cves[i]["status"]      = "pending"
+        last_fragment        = rationale
+        cves[i]["rationale"] = rationale
+        cves[i]["status"]    = "pending"
 
         elapsed = round(time.time() - t0, 2)
         synthesis_times.append(elapsed)
 
-        label_variant = "llm" if source == "bob" else "stream"
-        source_label  = "bob_mcp" if source == "bob" else "offline_stub"
+        label_variant = "llm"    if source == "rad"  else "stream"
+        source_label  = "ibm_rad" if source == "rad" else "offline_stub"
 
         steps.append(AgentStep(
             id=f"draft-{cve['id']}",
             title=f"Rationale drafted — {cve['id']}",
             desc=rationale[:120] + "…" if len(rationale) > 120 else rationale,
             chips=[
-                {"label": source_label,      "variant": label_variant},
-                {"label": f"{elapsed}s",     "variant": "done"},
+                {"label": source_label, "variant": label_variant},
+                {"label": f"{elapsed}s", "variant": "done"},
             ],
             state="done",
         ))
@@ -227,10 +218,10 @@ def synthesis_node(state: AgentState) -> dict:
     avg_s = round(sum(synthesis_times) / len(synthesis_times), 1) if synthesis_times else 0.0
 
     return {
-        "cves":           cves,
-        "agent_steps":    steps,
-        "token_fragment": last_fragment,
-        "tokens_used":    total_tokens,
-        "rag_hits":       rag_hit_count,
+        "cves":            cves,
+        "agent_steps":     steps,
+        "token_fragment":  last_fragment,
+        "tokens_used":     total_tokens,
+        "rag_hits":        rag_hit_count,
         "avg_synthesis_s": avg_s,
     }
