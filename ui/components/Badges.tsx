@@ -45,6 +45,41 @@ export function StatusDot({ status }: { status: CveStatus }) {
   );
 }
 
+export function SevBadge({ label, count, color }: { label: string; count: number; color: string }) {
+  if (count === 0) return null;
+  return (
+    <span
+      className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase"
+      style={{ background: `${color}18`, color }}
+    >
+      {count} {label}
+    </span>
+  );
+}
+
+export function StatusChip({ status, approved, total }: { status: string; approved: number; total: number }) {
+  const pct = total > 0 ? Math.round((approved / total) * 100) : 0;
+  return (
+    <div className="flex items-center gap-2">
+      <div
+        className="h-1.5 w-16 rounded-full overflow-hidden"
+        style={{ background: "var(--border)" }}
+      >
+        <div
+          className="h-full rounded-full"
+          style={{
+            width: `${pct}%`,
+            background: pct === 100 ? "var(--accent-green)" : pct > 60 ? "var(--accent-blue)" : "var(--accent-yellow)",
+          }}
+        />
+      </div>
+      <span className="text-[11px]" style={{ color: "var(--subtle)" }}>
+        {approved}/{total}
+      </span>
+    </div>
+  );
+}
+
 export function ChipVariant({
   label,
   variant,

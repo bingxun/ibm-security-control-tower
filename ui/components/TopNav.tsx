@@ -7,14 +7,16 @@ interface Props {
   agentStatus?: "running" | "awaiting" | "done" | "error";
   projectId?: string;
   imageRef?: string;
+  projectName?: string;
 }
 
-export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
+export default function TopNav({ agentStatus, projectId, imageRef, projectName }: Props) {
   const path = usePathname();
   const isReview    = path?.startsWith("/review");
   const isNewScan   = path?.startsWith("/new-scan");
   const isDashboard = path?.startsWith("/dashboard");
   const isSettings  = path?.startsWith("/settings");
+  const isProject   = path?.startsWith("/project");
   return (
     <nav
       className="h-14 flex items-center px-6 gap-4 flex-shrink-0"
@@ -88,6 +90,18 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
           </Link>
           <span style={{ color: "var(--dim)" }}>/</span>
           <span className="text-[12px] font-semibold" style={{ color: "var(--heading)" }}>Settings</span>
+        </div>
+      )}
+      {isProject && (
+        <div className="flex items-center gap-2 min-w-0">
+          <Link href="/dashboard" className="flex items-center gap-1.5 text-[12px] transition-opacity hover:opacity-70 flex-shrink-0" style={{ color: "var(--muted)" }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+            Dashboard
+          </Link>
+          <span style={{ color: "var(--dim)" }}>/</span>
+          <span className="text-[11px] font-mono px-2 py-1 rounded flex-shrink-0" style={{ background: "var(--surface2)", color: "var(--accent-blue)", border: "1px solid var(--border)" }}>
+            {projectName || "—"}
+          </span>
         </div>
       )}
 

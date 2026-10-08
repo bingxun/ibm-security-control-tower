@@ -23,7 +23,7 @@ export default function ContextPanel({ stats, cves }: Props) {
 
   return (
     <aside
-      className="w-64 flex-shrink-0 flex flex-col overflow-hidden"
+      className="hidden lg:flex lg:w-64 flex-shrink-0 flex-col overflow-hidden"
       style={{ background: "var(--surface)", borderLeft: "1px solid var(--border)" }}
     >
       {/* ── Session overview ── */}

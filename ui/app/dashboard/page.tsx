@@ -1,43 +1,20 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
+import { SevBadge, StatusChip } from "@/components/Badges";
 import { listScans, getDashboardStats, ScanSummary, DashboardStats } from "@/lib/api";
 
-function SevBadge({ label, count, color }: { label: string; count: number; color: string }) {
-  if (count === 0) return null;
-  return (
-    <span
-      className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase"
-      style={{ background: `${color}18`, color }}
-    >
-      {count} {label}
-    </span>
-  );
-}
-
-function StatusChip({ status, approved, total }: { status: string; approved: number; total: number }) {
-  const pct = Math.round((approved / total) * 100);
-  return (
-    <div className="flex items-center gap-2">
-      <div
-        className="h-1.5 w-16 rounded-full overflow-hidden"
-        style={{ background: "var(--border)" }}
-      >
-        <div
-          className="h-full rounded-full"
-          style={{
-            width: `${pct}%`,
-            background: pct === 100 ? "var(--accent-green)" : pct > 60 ? "var(--accent-blue)" : "var(--accent-yellow)",
-          }}
-        />
-      </div>
-      <span className="text-[11px]" style={{ color: "var(--subtle)" }}>
-        {approved}/{total}
-      </span>
-    </div>
-  );
+interface ProjectSummary {
+  project: string;
+  imageCount: number;
+  totalCves: number;
+  critical: number;
+  high: number;
+  medium: number;
+  approved: number;
+  latestDate: string;
 }
 
 const EMPTY_STATS: DashboardStats = {
@@ -64,6 +41,38 @@ export default function DashboardPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  const projects = useMemo<ProjectSummary[]>(() => {
+    const byProject = new Map<string, ProjectSummary & { images: Set<string> }>();
+    for (const scan of scans) {
+      let p = byProject.get(scan.project);
+      if (!p) {
+        p = {
+          project: scan.project,
+          imageCount: 0,
+          totalCves: 0,
+          critical: 0,
+          high: 0,
+          medium: 0,
+          approved: 0,
+          latestDate: scan.date,
+          images: new Set<string>(),
+        };
+        byProject.set(scan.project, p);
+      }
+      p.images.add(scan.image);
+      p.totalCves += scan.totalCves;
+      p.critical += scan.critical;
+      p.high += scan.high;
+      p.medium += scan.medium;
+      p.approved += scan.approved;
+      if (scan.date > p.latestDate) p.latestDate = scan.date;
+    }
+    return Array.from(byProject.values()).map((p) => ({
+      ...p,
+      imageCount: p.images.size,
+    }));
+  }, [scans]);
+
   const statsRow = [
     { label: "Total scans",        value: String(dashStats.totalScans),               sub: "all time",          color: "var(--accent-blue)"   },
     { label: "CVEs triaged",       value: String(dashStats.cvesTriaged),              sub: "across all scans",  color: "var(--accent-purple)" },
@@ -82,7 +91,7 @@ export default function DashboardPage() {
         <div className="max-w-5xl mx-auto px-8 py-8 flex flex-col gap-8">
 
           {/* ── Hero row ── */}
-          <div className="flex items-start justify-between gap-6">
+          <div className="flex flex-wrap items-start justify-between gap-6">
             <div>
               <h1
                 className="text-[26px] font-black tracking-tight"
@@ -113,7 +122,7 @@ export default function DashboardPage() {
           </div>
 
           {/* ── Stats row ── */}
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {statsRow.map((s) => (
               <div
                 key={s.label}
@@ -142,7 +151,7 @@ export default function DashboardPage() {
 
           {/* ── Pipeline reminder ── */}
           <div
-            className="rounded-2xl px-6 py-4 flex items-center gap-8"
+            className="rounded-2xl px-6 py-4 flex flex-wrap items-center gap-4 lg:gap-8"
             style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
           >
             <span className="text-[12px] font-semibold uppercase tracking-wider flex-shrink-0" style={{ color: "var(--muted)" }}>
@@ -154,7 +163,7 @@ export default function DashboardPage() {
               { step: "03", label: "Human Approval",  desc: "Authority review gate",      color: "var(--accent-yellow)" },
               { step: "04", label: "Persistence",     desc: "Store to RAG memory",        color: "var(--accent-green)"  },
             ].map((p, i) => (
-              <div key={p.step} className="flex items-center gap-3 flex-1">
+              <div key={p.step} className="flex items-center gap-3 flex-1 min-w-[160px]">
                 <div
                   className="w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-black flex-shrink-0"
                   style={{ background: `${p.color}18`, color: p.color }}
@@ -166,7 +175,7 @@ export default function DashboardPage() {
                   <div className="text-[11px]" style={{ color: "var(--muted)" }}>{p.desc}</div>
                 </div>
                 {i < 3 && (
-                  <svg className="ml-auto flex-shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--dim)" strokeWidth="2" strokeLinecap="round">
+                  <svg className="ml-auto flex-shrink-0 hidden lg:block" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--dim)" strokeWidth="2" strokeLinecap="round">
                     <polyline points="9 18 15 12 9 6"/>
                   </svg>
                 )}
@@ -174,14 +183,14 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          {/* ── Recent scans table ── */}
+          {/* ── Projects table ── */}
           <div>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-[15px] font-bold" style={{ color: "var(--heading)" }}>
-                Recent Scans
+                Projects
               </h2>
               <span className="text-[12px]" style={{ color: "var(--muted)" }}>
-                {loading ? "Loading…" : `${scans.length} scans`}
+                {loading ? "Loading…" : `${projects.length} projects`}
               </span>
             </div>
 
@@ -208,7 +217,7 @@ export default function DashboardPage() {
               )}
 
               {/* Empty state */}
-              {!loading && !error && scans.length === 0 && (
+              {!loading && !error && projects.length === 0 && (
                 <div className="px-5 py-12 flex flex-col items-center gap-3">
                   <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--dim)" strokeWidth="1.5" strokeLinecap="round">
                     <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
@@ -226,98 +235,80 @@ export default function DashboardPage() {
               )}
 
               {/* Table header + rows */}
-              {!loading && !error && scans.length > 0 && (<>
+              {!loading && !error && projects.length > 0 && (
+              <div className="overflow-x-auto">
+              <div className="min-w-[720px]">
               <div
                 className="grid grid-cols-12 px-5 py-3 text-[11px] font-semibold uppercase tracking-wider"
                 style={{ borderBottom: "1px solid var(--border)", color: "var(--muted)" }}
               >
-                <div className="col-span-1">ID</div>
-                <div className="col-span-2">Project</div>
-                <div className="col-span-4">Image</div>
+                <div className="col-span-3">Project</div>
+                <div className="col-span-3">Images</div>
                 <div className="col-span-2">Findings</div>
-                <div className="col-span-2">Approval</div>
+                <div className="col-span-3">Approval</div>
                 <div className="col-span-1 text-right">Date</div>
               </div>
 
-              {scans.map((scan, i) => (
+              {projects.map((p, i) => (
                 <Link
-                  key={scan.id}
-                  href={`/review?run=${scan.id}`}
+                  key={p.project}
+                  href={`/project?name=${encodeURIComponent(p.project)}`}
                   className="grid grid-cols-12 px-5 py-4 items-center transition-colors"
                   style={{
-                    borderBottom: i < scans.length - 1 ? "1px solid var(--border)" : "none",
+                    borderBottom: i < projects.length - 1 ? "1px solid var(--border)" : "none",
                   }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface2)")}
                   onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                 >
-                  {/* ID */}
-                  <div className="col-span-1">
-                    <span
-                      className="text-[11px] font-mono font-semibold"
-                      style={{ color: "var(--accent-blue)" }}
-                    >
-                      {scan.id}
-                    </span>
-                  </div>
-
                   {/* Project */}
-                  <div className="col-span-2">
+                  <div className="col-span-3">
                     <span
                       className="text-[12px] font-mono font-semibold px-2 py-0.5 rounded"
                       style={{ background: "var(--surface2)", color: "var(--faint)", border: "1px solid var(--border)" }}
                     >
-                      {scan.project}
+                      {p.project}
                     </span>
                   </div>
 
-                  {/* Image */}
-                  <div className="col-span-4 min-w-0">
-                    <p
-                      className="text-[12px] font-mono truncate"
-                      style={{ color: "var(--body)" }}
-                    >
-                      {scan.image}
-                    </p>
-                    <p className="text-[11px] mt-0.5" style={{ color: "var(--muted)" }}>
-                      {scan.duration}
+                  {/* Images */}
+                  <div className="col-span-3 min-w-0">
+                    <p className="text-[12px]" style={{ color: "var(--body)" }}>
+                      {p.imageCount} container image{p.imageCount === 1 ? "" : "s"}
                     </p>
                   </div>
 
                   {/* Findings */}
                   <div className="col-span-2">
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <SevBadge label="C" count={scan.critical} color="var(--accent-red)"    />
-                      <SevBadge label="H" count={scan.high}     color="var(--accent-orange)" />
-                      <SevBadge label="M" count={scan.medium}   color="var(--accent-yellow)" />
+                      <SevBadge label="C" count={p.critical} color="var(--accent-red)"    />
+                      <SevBadge label="H" count={p.high}     color="var(--accent-orange)" />
+                      <SevBadge label="M" count={p.medium}   color="var(--accent-yellow)" />
                     </div>
                     <p className="text-[11px] mt-1" style={{ color: "var(--muted)" }}>
-                      {scan.totalCves} total
+                      {p.totalCves} total
                     </p>
                   </div>
 
                   {/* Approval bar */}
-                  <div className="col-span-2">
+                  <div className="col-span-3">
                     <StatusChip
-                      status={scan.status}
-                      approved={scan.approved}
-                      total={scan.totalCves}
+                      status="completed"
+                      approved={p.approved}
+                      total={p.totalCves}
                     />
-                    {scan.rejected > 0 && (
-                      <p className="text-[11px] mt-0.5" style={{ color: "var(--accent-red)" }}>
-                        {scan.rejected} rejected
-                      </p>
-                    )}
                   </div>
 
                   {/* Date */}
                   <div className="col-span-1 text-right">
                     <span className="text-[11px]" style={{ color: "var(--muted)" }}>
-                      {scan.date}
+                      {p.latestDate}
                     </span>
                   </div>
                 </Link>
               ))}
-              </>)}
+              </div>
+              </div>
+              )}
             </div>
           </div>
 
