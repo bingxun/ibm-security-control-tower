@@ -6,15 +6,22 @@ Tables:
   cves         — one row per CVE, FK → runs
   trivy_logs   — one row per log line, FK → runs
   agent_steps  — one row per timeline step, FK → runs
+  users        — platform users with hashed passwords and roles
+  sessions     — JWT-style token store (opaque tokens, server-side)
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import secrets
 import sqlite3
+import uuid as _uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Generator
+
+uuid_gen = _uuid.uuid4
 
 DB_PATH = os.getenv("DB_PATH", "./data/control_tower.db")
 
@@ -39,6 +46,23 @@ def get_conn() -> Generator[sqlite3.Connection, None, None]:
 
 
 # ── Schema ─────────────────────────────────────────────────────────────────
+
+def _hash_password(password: str) -> str:
+    """SHA-256 + random salt. Production: use bcrypt/argon2."""
+    salt = secrets.token_hex(16)
+    h    = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
+    return f"{salt}:{h}"
+
+
+def _verify_password(password: str, stored: str) -> bool:
+    try:
+        salt, h = stored.split(":", 1)
+        return secrets.compare_digest(
+            hashlib.sha256(f"{salt}{password}".encode()).hexdigest(), h
+        )
+    except Exception:
+        return False
+
 
 def init_db() -> None:
     """Create tables if they don't exist. Safe to call on every startup."""
@@ -100,6 +124,27 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_cves_run ON cves(run_id);
             CREATE INDEX IF NOT EXISTS idx_logs_run ON trivy_logs(run_id);
             CREATE INDEX IF NOT EXISTS idx_steps_run ON agent_steps(run_id);
+
+            CREATE TABLE IF NOT EXISTS users (
+                id              TEXT PRIMARY KEY,
+                email           TEXT NOT NULL UNIQUE,
+                name            TEXT NOT NULL,
+                role            TEXT NOT NULL DEFAULT 'DEVOPS_ENGINEER',
+                password_hash   TEXT NOT NULL,
+                is_active       INTEGER NOT NULL DEFAULT 1,
+                created_at      TEXT NOT NULL,
+                updated_at      TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS sessions (
+                token       TEXT PRIMARY KEY,
+                user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                created_at  TEXT NOT NULL,
+                expires_at  TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+            CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
         """)
 
         # Migration: add columns introduced after this table was first created.
@@ -359,3 +404,144 @@ def get_scan_summaries(limit: int = 50) -> list[dict]:
                 "duration":  duration,
             })
         return result
+
+
+# ── User CRUD ──────────────────────────────────────────────────────────────
+
+VALID_ROLES = {"ADMIN", "DEVOPS_ENGINEER", "CYBER_MANAGER"}
+SESSION_TTL_HOURS = 24
+
+
+def create_user(
+    email: str,
+    name: str,
+    password: str,
+    role: str = "DEVOPS_ENGINEER",
+) -> dict:
+    """Create a new user. Raises ValueError on duplicate email or bad role."""
+    if role not in VALID_ROLES:
+        raise ValueError(f"Invalid role: {role}")
+    user_id = str(uuid_gen())
+    now = datetime.now(timezone.utc).isoformat()
+    with get_conn() as conn:
+        try:
+            conn.execute(
+                """INSERT INTO users (id, email, name, role, password_hash, is_active, created_at, updated_at)
+                   VALUES (?,?,?,?,?,1,?,?)""",
+                (user_id, email.lower(), name, role, _hash_password(password), now, now),
+            )
+        except sqlite3.IntegrityError:
+            raise ValueError(f"Email already registered: {email}")
+    return get_user_by_id(user_id)  # type: ignore[return-value]
+
+
+def get_user_by_id(user_id: str) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, email, name, role, is_active, created_at, updated_at FROM users WHERE id=?",
+            (user_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_user_by_email(email: str) -> dict | None:
+    """Returns user WITH password_hash for authentication."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE email=?", (email.lower(),)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def list_users() -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, email, name, role, is_active, created_at, updated_at FROM users ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_user(
+    user_id: str,
+    *,
+    name: str | None = None,
+    role: str | None = None,
+    is_active: bool | None = None,
+    password: str | None = None,
+) -> dict | None:
+    if role and role not in VALID_ROLES:
+        raise ValueError(f"Invalid role: {role}")
+    now = datetime.now(timezone.utc).isoformat()
+    with get_conn() as conn:
+        if name is not None:
+            conn.execute("UPDATE users SET name=?, updated_at=? WHERE id=?", (name, now, user_id))
+        if role is not None:
+            conn.execute("UPDATE users SET role=?, updated_at=? WHERE id=?", (role, now, user_id))
+        if is_active is not None:
+            conn.execute("UPDATE users SET is_active=?, updated_at=? WHERE id=?", (int(is_active), now, user_id))
+        if password is not None:
+            conn.execute("UPDATE users SET password_hash=?, updated_at=? WHERE id=?", (_hash_password(password), now, user_id))
+    return get_user_by_id(user_id)
+
+
+def delete_user(user_id: str) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+
+
+# ── Session CRUD ───────────────────────────────────────────────────────────
+
+def create_session(user_id: str) -> str:
+    """Create an opaque session token valid for SESSION_TTL_HOURS."""
+    token    = secrets.token_urlsafe(32)
+    now      = datetime.now(timezone.utc)
+    expires  = (now + timedelta(hours=SESSION_TTL_HOURS)).isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?,?,?,?)",
+            (token, user_id, now.isoformat(), expires),
+        )
+    return token
+
+
+def get_session_user(token: str) -> dict | None:
+    """Return the user for a valid, non-expired session token."""
+    now = datetime.now(timezone.utc).isoformat()
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT u.id, u.email, u.name, u.role, u.is_active
+               FROM sessions s
+               JOIN users u ON u.id = s.user_id
+               WHERE s.token=? AND s.expires_at > ? AND u.is_active=1""",
+            (token, now),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def delete_session(token: str) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM sessions WHERE token=?", (token,))
+
+
+def purge_expired_sessions() -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    with get_conn() as conn:
+        conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
+
+
+# ── Seed default admin ─────────────────────────────────────────────────────
+
+def seed_admin(
+    email: str = "admin@controltower.local",
+    password: str = "Admin@1234",
+    name: str = "Platform Admin",
+) -> None:
+    """Idempotent — only creates the admin if no users exist yet."""
+    with get_conn() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    if count == 0:
+        create_user(email=email, name=name, password=password, role="ADMIN")
+        import logging
+        logging.getLogger("control_tower").info(
+            "Seeded default admin: %s / %s", email, password
+        )

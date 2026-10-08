@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import { SevBadge, StatusChip } from "@/components/Badges";
+import RequireAuth from "@/components/RequireAuth";
 import { listScans, getDashboardStats, ScanSummary, DashboardStats } from "@/lib/api";
 
 interface ProjectSummary {
@@ -25,7 +26,7 @@ const EMPTY_STATS: DashboardStats = {
   ragFirstPassRate: 0,
 };
 
-export default function DashboardPage() {
+function DashboardPageInner() {
   const [scans, setScans] = useState<ScanSummary[]>([]);
   const [dashStats, setDashStats] = useState<DashboardStats>(EMPTY_STATS);
   const [loading, setLoading] = useState(true);
@@ -343,5 +344,13 @@ export default function DashboardPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <RequireAuth>
+      <DashboardPageInner />
+    </RequireAuth>
   );
 }

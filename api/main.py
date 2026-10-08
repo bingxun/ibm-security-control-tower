@@ -34,10 +34,11 @@ if sys.platform == "win32":
 logger = logging.getLogger("control_tower")
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from langgraph.types import Command
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from sse_starlette.sse import EventSourceResponse
 
 load_dotenv()
@@ -52,6 +53,11 @@ from db.database import (
     append_trivy_log, get_trivy_logs,
     upsert_agent_steps, get_agent_steps,
     get_dashboard_stats, get_scan_summaries,
+    # auth
+    create_user, get_user_by_id, get_user_by_email, list_users,
+    update_user, delete_user,
+    create_session, get_session_user, delete_session,
+    seed_admin, VALID_ROLES,
 )
 
 GRAPH = build_graph()
@@ -472,7 +478,8 @@ def _push_event(run_id: str, status: str) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     os.makedirs("./data", exist_ok=True)
-    init_db()   # create tables if they don't exist
+    init_db()       # create tables if they don't exist
+    seed_admin()    # create default admin if no users yet
     yield
 
 app = FastAPI(title="Control Tower API", version="1.0.0", lifespan=lifespan)
@@ -742,3 +749,157 @@ def _elapsed(started_at: str) -> str:
         return f"{secs // 60}m {secs % 60}s"
     except Exception:
         return "—"
+
+
+# ── Auth dependency ────────────────────────────────────────────────────────
+
+_bearer = HTTPBearer(auto_error=False)
+
+
+def _get_token(
+    req: Request,
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> str | None:
+    """Extract bearer token from Authorization header or sct_token cookie."""
+    if creds:
+        return creds.credentials
+    return req.cookies.get("sct_token")
+
+
+def require_auth(
+    req: Request,
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> dict:
+    """Dependency: returns the current user or raises 401."""
+    token = _get_token(req, creds)
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user = get_session_user(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Session expired or invalid")
+    return user
+
+
+def require_admin(current_user: dict = Depends(require_auth)) -> dict:
+    """Dependency: current user must be ADMIN."""
+    if current_user["role"] != "ADMIN":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return current_user
+
+
+# ── Auth request/response models ───────────────────────────────────────────
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class CreateUserRequest(BaseModel):
+    email: str
+    name: str
+    password: str
+    role: str = "DEVOPS_ENGINEER"
+
+
+class UpdateUserRequest(BaseModel):
+    name: str | None = None
+    role: str | None = None
+    is_active: bool | None = None
+    password: str | None = None
+
+
+def _safe_user(u: dict) -> dict:
+    """Strip password_hash before returning user to client."""
+    return {k: v for k, v in u.items() if k != "password_hash"}
+
+
+# ── Auth routes ────────────────────────────────────────────────────────────
+
+@app.post("/auth/login")
+def auth_login(req: LoginRequest):
+    """Authenticate and return a session token."""
+    user = get_user_by_email(req.email)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    from db.database import _verify_password
+    if not _verify_password(req.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    if not user["is_active"]:
+        raise HTTPException(status_code=403, detail="Account is deactivated")
+
+    token = create_session(user["id"])
+    return {
+        "token": token,
+        "user":  _safe_user(user),
+    }
+
+
+@app.post("/auth/logout")
+def auth_logout(
+    req: Request,
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+):
+    token = _get_token(req, creds)
+    if token:
+        delete_session(token)
+    return {"ok": True}
+
+
+@app.get("/auth/me")
+def auth_me(current_user: dict = Depends(require_auth)):
+    """Return the current authenticated user."""
+    return _safe_user(current_user)
+
+
+# ── User management routes (ADMIN only) ────────────────────────────────────
+
+@app.get("/users")
+def users_list(_admin: dict = Depends(require_admin)):
+    return [_safe_user(u) for u in list_users()]
+
+
+@app.post("/users", status_code=201)
+def users_create(req: CreateUserRequest, _admin: dict = Depends(require_admin)):
+    if req.role not in VALID_ROLES:
+        raise HTTPException(status_code=422, detail=f"Invalid role. Valid: {sorted(VALID_ROLES)}")
+    try:
+        user = create_user(email=req.email, name=req.name, password=req.password, role=req.role)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return _safe_user(user)
+
+
+@app.put("/users/{user_id}")
+def users_update(
+    user_id: str,
+    req: UpdateUserRequest,
+    current_admin: dict = Depends(require_admin),
+):
+    # Prevent admin from deactivating themselves
+    if user_id == current_admin["id"] and req.is_active is False:
+        raise HTTPException(status_code=400, detail="Cannot deactivate your own account")
+    if user_id == current_admin["id"] and req.role is not None and req.role != "ADMIN":
+        raise HTTPException(status_code=400, detail="Cannot change your own admin role")
+    if req.role and req.role not in VALID_ROLES:
+        raise HTTPException(status_code=422, detail=f"Invalid role. Valid: {sorted(VALID_ROLES)}")
+    updated = update_user(
+        user_id,
+        name=req.name,
+        role=req.role,
+        is_active=req.is_active,
+        password=req.password,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="User not found")
+    return _safe_user(updated)
+
+
+@app.delete("/users/{user_id}", status_code=204)
+def users_delete(user_id: str, current_admin: dict = Depends(require_admin)):
+    if user_id == current_admin["id"]:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+    if not get_user_by_id(user_id):
+        raise HTTPException(status_code=404, detail="User not found")
+    delete_user(user_id)

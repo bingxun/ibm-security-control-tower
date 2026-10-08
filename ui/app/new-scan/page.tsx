@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import TopNav from "@/components/TopNav";
+import RequireAuth from "@/components/RequireAuth";
 import { startScan } from "@/lib/api";
 
 // ── Form shape ─────────────────────────────────────────────────────────────
@@ -162,7 +163,7 @@ function SectionCard({
 
 // ── Main page ──────────────────────────────────────────────────────────────
 
-export default function NewScanPage() {
+function NewScanPageInner() {
   const router = useRouter();
   const [form, setForm] = useState<ScanForm>({
     imageRef: "",
@@ -650,5 +651,13 @@ export default function NewScanPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function NewScanPage() {
+  return (
+    <RequireAuth permission="canScan">
+      <NewScanPageInner />
+    </RequireAuth>
   );
 }

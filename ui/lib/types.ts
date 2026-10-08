@@ -1,3 +1,43 @@
+// ── Auth / RBAC ────────────────────────────────────────────────────────────
+
+export type UserRole = "ADMIN" | "DEVOPS_ENGINEER" | "CYBER_MANAGER";
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  avatarInitials: string;
+}
+
+/** Fine-grained permissions derived from role */
+export interface RolePermissions {
+  canScan: boolean;       // start new scans
+  canApprove: boolean;    // approve / reject CVEs
+  canViewSettings: boolean; // access settings page
+  canManageUsers: boolean;  // user management (admin only)
+}
+
+export const ROLE_PERMISSIONS: Record<UserRole, RolePermissions> = {
+  ADMIN:           { canScan: true,  canApprove: true,  canViewSettings: true,  canManageUsers: true  },
+  DEVOPS_ENGINEER: { canScan: true,  canApprove: false, canViewSettings: false, canManageUsers: false },
+  CYBER_MANAGER:   { canScan: false, canApprove: true,  canViewSettings: true,  canManageUsers: false },
+};
+
+export const ROLE_LABELS: Record<UserRole, string> = {
+  ADMIN:           "Admin",
+  DEVOPS_ENGINEER: "DevOps Engineer",
+  CYBER_MANAGER:   "Cyber Manager",
+};
+
+export const ROLE_COLORS: Record<UserRole, { bg: string; text: string; border: string }> = {
+  ADMIN:           { bg: "rgba(124,92,216,0.12)", text: "#7c5cd8", border: "rgba(124,92,216,0.25)" },
+  DEVOPS_ENGINEER: { bg: "rgba(68,147,248,0.12)", text: "#4493f8", border: "rgba(68,147,248,0.25)" },
+  CYBER_MANAGER:   { bg: "rgba(34,197,94,0.12)",  text: "#22c55e", border: "rgba(34,197,94,0.25)"  },
+};
+
+// ── Domain types ───────────────────────────────────────────────────────────
+
 export type Severity = "critical" | "high" | "medium" | "low";
 export type CveStatus = "approved" | "rejected" | "pending" | "queued";
 
