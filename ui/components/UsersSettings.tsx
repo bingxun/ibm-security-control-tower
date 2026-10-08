@@ -1,18 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import styles from "./Management.module.css";
 import { useAuth } from "@/lib/auth";
-import { ROLE_LABELS, type UserRole } from "@/lib/types";
+import { ROLE_LABELS, ROLE_COLORS, type UserRole } from "@/lib/types";
 import { listUsers, createPlatformUser, updatePlatformUser, type PlatformUser, type UpdateUserPayload } from "@/lib/api";
 
 const roles = Object.keys(ROLE_LABELS) as UserRole[];
 const descriptions: Record<UserRole, string> = {
-  ADMIN: "Scan, review findings, and manage users.",
+  SUPER_ADMIN: "Manage all projects, memberships, and users.",
+  ADMIN: "Scan and review within assigned projects.",
   DEVOPS_ENGINEER: "Start scans and view findings.",
   CYBER_MANAGER: "Review findings and access settings.",
 };
-const control = "w-full min-h-11 rounded-lg border border-[var(--border2)] bg-[var(--surface2)] px-3 py-2 text-sm text-[var(--body)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)] disabled:opacity-60";
-const button = "min-h-11 rounded-lg border border-[var(--border2)] px-3 py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)] disabled:opacity-60 disabled:cursor-not-allowed";
+const control = styles.field;
+const button = styles.button;
 const emptyDraft = { name: "", email: "", password: "", role: "DEVOPS_ENGINEER" as UserRole };
 
 export default function UsersSettings() {
@@ -85,7 +87,7 @@ export default function UsersSettings() {
     if (success.startsWith("Created ")) createButtonRef.current?.focus();
   }, [success]);
 
-  if (!allowed) return <p role="status" className="text-sm text-[var(--body)]">Only administrators can manage users.</p>;
+  if (!allowed) return <p role="status" className="text-sm text-[var(--body)]">Only super admins can manage users.</p>;
 
   return <section aria-labelledby="users-heading" className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-[var(--body)]">
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-6 py-4">
@@ -100,7 +102,7 @@ export default function UsersSettings() {
       {!loading && !loadError && <>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-[var(--faint)]">{users.length} {users.length === 1 ? "user" : "users"}</p>
-          <button ref={createButtonRef} className={button} onClick={() => { setShowCreate(!showCreate); setDraft(emptyDraft); setError(null); setSuccess(""); }} disabled={busy !== null} aria-expanded={showCreate} aria-controls="create-user-form">{showCreate ? "Cancel" : "Create user"}</button>
+          <button ref={createButtonRef} className={showCreate ? button : styles.primary} onClick={() => { setShowCreate(!showCreate); setDraft(emptyDraft); setError(null); setSuccess(""); }} disabled={busy !== null} aria-expanded={showCreate} aria-controls="create-user-form">{showCreate ? "Cancel" : "Create user"}</button>
         </div>
         {showCreate && <form id="create-user-form" onSubmit={create} aria-busy={busy === "create"} className="space-y-4 rounded-xl border border-[var(--border)] p-4">
           <h2 className="text-sm font-semibold">Create user</h2>
@@ -109,27 +111,27 @@ export default function UsersSettings() {
             <label className="space-y-1 text-sm">Name<input className={control} name="name" autoComplete="off" required value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></label>
             <label className="space-y-1 text-sm">Email<input className={control} name="email" type="email" autoComplete="off" autoCapitalize="none" spellCheck={false} required value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} /></label>
             <label className="space-y-1 text-sm"><span id="new-user-password-label">Password</span><input aria-labelledby="new-user-password-label" className={control} name="password" type="password" autoComplete="new-password" required minLength={8} aria-describedby="new-password-help" value={draft.password} onChange={(e) => setDraft({ ...draft, password: e.target.value })} /><span id="new-password-help" className="text-xs text-[var(--faint)]">At least 8 characters.</span></label>
-            <label className="space-y-1 text-sm"><span id="new-user-role-label">Role</span><select aria-labelledby="new-user-role-label" className={control} value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value as UserRole })}>{roles.map((role) => <option key={role} value={role}>{ROLE_LABELS[role]}</option>)}</select></label>
+            <label className="space-y-1 text-sm"><span id="new-user-role-label">Role</span><select aria-labelledby="new-user-role-label" className={styles.select} value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value as UserRole })}>{roles.map((role) => <option key={role} value={role}>{ROLE_LABELS[role]}</option>)}</select></label>
           </fieldset>
           <button type="submit" disabled={busy !== null} className={`${button} bg-[var(--btn-accept-bg)] text-[var(--btn-accept-text)] hover:opacity-90`}>{busy === "create" ? "Creating…" : "Create account"}</button>
         </form>}
-        <div className="flex flex-wrap gap-x-5 gap-y-3 text-xs text-[var(--faint)]">{roles.map((role) => <div key={role}><strong className="text-[var(--body)]">{ROLE_LABELS[role]}</strong><p className="mt-1">{descriptions[role]}</p></div>)}</div>
+        <details className="rounded-xl border border-[var(--border)]"><summary className="cursor-pointer px-4 py-3 text-xs font-semibold text-[var(--faint)]">Role permissions</summary><div className={styles.roleLegend}>{roles.map((role) => <div key={role}><strong className="flex items-center gap-2 text-[var(--body)]"><span aria-hidden="true" className="inline-block h-2 w-2 rounded-full" style={{ background: ROLE_COLORS[role].text }} />{ROLE_LABELS[role]}</strong><p className="mt-1">{descriptions[role]}</p></div>)}</div></details>
         <div className="overflow-x-auto rounded-xl border border-[var(--border)]">
-          <table className="w-full min-w-[520px] text-left text-sm">
+          <table className={`${styles.table} w-full min-w-[600px] text-left text-sm`}>
             <caption className="sr-only">Workspace users and role and account status controls</caption>
             <thead className="bg-[var(--surface2)] text-xs text-[var(--faint)]"><tr><th scope="col" className="p-3">User</th><th scope="col" className="p-3">Role</th><th scope="col" className="p-3">Status</th></tr></thead>
             <tbody>{users.map((account) => {
               const self = account.id === user?.id;
               return <tr key={account.id} aria-busy={busy === account.id} className="border-t border-[var(--border)]">
-                <th scope="row" className="p-3 font-normal"><div className="font-semibold text-[var(--heading)]">{account.name}{self && <span className="ml-2 text-xs font-normal text-[var(--faint)]">(you)</span>}</div><div className="mt-1 break-all text-xs text-[var(--faint)]">{account.email}</div></th>
-                <td className="p-3"><select aria-label={`Role for ${account.email}`} aria-describedby={self ? "self-account-help" : undefined} className={control} value={account.role} disabled={self || busy !== null} onChange={(e) => update(account, { role: e.target.value as UserRole })}>{roles.map((role) => <option key={role} value={role}>{ROLE_LABELS[role]}</option>)}</select></td>
-                <td className="p-3"><button type="button" className={button} role="switch" aria-checked={Boolean(account.is_active)} aria-label={`Account active for ${account.email}`} aria-describedby={self ? "self-account-help" : undefined} disabled={self || busy !== null} onClick={() => update(account, { is_active: !account.is_active })}>{account.is_active ? "Active" : "Inactive"}</button></td>
+                <th scope="row" className="p-3 font-normal"><div className="flex items-center gap-3"><span className={styles.avatar} aria-hidden="true">{account.name.split(" ").map(part => part[0]).slice(0, 2).join("").toUpperCase()}</span><div><div className="font-semibold text-[var(--heading)]">{account.name}{self && <span className="ml-2 text-xs font-normal text-[var(--faint)]">(you)</span>}</div><div className="mt-1 break-all text-xs text-[var(--faint)]">{account.email}</div></div></div></th>
+                <td className="p-3"><select aria-label={`Role for ${account.email}`} aria-describedby={self ? "self-account-help" : undefined} className={`${styles.select} ${styles.roleSelect}`} style={{ backgroundColor: ROLE_COLORS[account.role].bg, borderColor: ROLE_COLORS[account.role].border, color: ROLE_COLORS[account.role].text }} value={account.role} disabled={self || busy !== null} onChange={(e) => update(account, { role: e.target.value as UserRole })}>{roles.map((role) => <option key={role} value={role}>{ROLE_LABELS[role]}</option>)}</select></td>
+                <td className="p-3"><button type="button" className={styles.status} role="switch" aria-checked={Boolean(account.is_active)} aria-label={`Account active for ${account.email}`} aria-describedby={self ? "self-account-help" : undefined} disabled={self || busy !== null} onClick={() => update(account, { is_active: !account.is_active })}>{account.is_active ? "Active" : "Inactive"}</button></td>
               </tr>;
             })}</tbody>
           </table>
           {users.length === 0 && <p className="p-4 text-sm">No users found.</p>}
         </div>
-        <p id="self-account-help" className="text-xs text-[var(--faint)]">Your own admin role and active status cannot be changed here.</p>
+        <p id="self-account-help" className="text-xs text-[var(--faint)]">Your own super admin role and active status cannot be changed here.</p>
         <p role="status" className="text-sm">{busy && busy !== "create" ? "Saving changes…" : ""}</p>
       </>}
     </div>

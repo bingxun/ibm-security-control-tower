@@ -30,7 +30,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from langgraph.types import Command
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 load_dotenv()
@@ -49,7 +49,9 @@ from db.database import (
     create_user, get_user_by_id, get_user_by_email, list_users,
     update_user, delete_user,
     create_session, get_session_user, delete_session,
-    seed_admin, VALID_ROLES,
+    seed_admin, VALID_ROLES, migrate_super_admin,
+    list_projects, get_project, has_project_access, create_project,
+    project_member_ids, set_project_members,
 )
 
 GRAPH = build_graph()
@@ -140,6 +142,7 @@ class ScanRequest(BaseModel):
 
 class ImageScanRequest(BaseModel):
     imageRef: str  # e.g. "nginx:1.21.6"
+    projectId: str
 
 
 class DecisionRequest(BaseModel):
@@ -467,7 +470,8 @@ def _push_event(run_id: str, status: str) -> None:
 async def lifespan(app: FastAPI):
     os.makedirs("./data", exist_ok=True)
     init_db()       # create tables if they don't exist
-    seed_admin()    # create default admin if no users yet
+    seed_admin()
+    migrate_super_admin()
     yield
 
 app = FastAPI(title="Control Tower API", version="1.0.0", lifespan=lifespan)
@@ -480,19 +484,105 @@ app.add_middleware(
 )
 
 
+# ── Auth dependency ────────────────────────────────────────────────────────
+
+_bearer = HTTPBearer(auto_error=False)
+
+
+def _get_token(
+    req: Request,
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> str | None:
+    """Extract bearer token from Authorization header or sct_token cookie."""
+    if creds:
+        return creds.credentials
+    return req.cookies.get("sct_token")
+
+
+def require_auth(
+    req: Request,
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> dict:
+    """Dependency: returns the current user or raises 401."""
+    token = _get_token(req, creds)
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user = get_session_user(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Session expired or invalid")
+    return user
+
+
+def require_super_admin(current_user: dict = Depends(require_auth)) -> dict:
+    """Dependency: only super admins administer global users and projects."""
+    if current_user["role"] != "SUPER_ADMIN":
+        raise HTTPException(status_code=403, detail="Super admin access required")
+    return current_user
+
+
+def require_scanner(user: dict = Depends(require_auth)) -> dict:
+    if user["role"] not in {"SUPER_ADMIN", "ADMIN", "DEVOPS_ENGINEER"}:
+        raise HTTPException(status_code=403, detail="Your role cannot start scans")
+    return user
+
+
+def require_reviewer(user: dict = Depends(require_auth)) -> dict:
+    if user["role"] not in {"SUPER_ADMIN", "ADMIN", "CYBER_MANAGER"}:
+        raise HTTPException(status_code=403, detail="Your role cannot review findings")
+    return user
+
+
+def accessible_projects(user: dict, project_id: str | None = None) -> list[str] | None:
+    if project_id is not None:
+        check_project(user, project_id)
+        return [project_id]
+    return None if user["role"] == "SUPER_ADMIN" else [p["id"] for p in list_projects(user)]
+
+
+def check_project(user: dict, project_id: str) -> None:
+    if not has_project_access(user, project_id):
+        raise HTTPException(status_code=404, detail="Project not found or not assigned to you")
+
+
+def check_run(user: dict, run_id: str) -> dict:
+    run = db_get_run(run_id)
+    if not run or not has_project_access(user, run["project_id"]):
+        raise HTTPException(status_code=404, detail="Run not found or not assigned to you")
+    return run
+
+
+def safe_snapshot(user: dict, run_id: str) -> dict:
+    run = check_run(user, run_id)
+    snapshot = _run_snapshot(run_id)
+    # Older AI text may contain cross-project memory. Keep raw findings available,
+    # but expose historical generated content only to the super admin.
+    if not run.get("project_scoped") and user["role"] != "SUPER_ADMIN":
+        for cve in snapshot.get("cves", []):
+            cve["ragMatch"] = None
+            cve["rationale"] = "Historical rationale withheld. Run a new scan for project-isolated analysis."
+        snapshot["agent_steps"] = []
+        snapshot["token_fragment"] = ""
+        snapshot["trivy_logs"] = []
+        snapshot["stats"]["ragHits"] = 0
+    return snapshot
+
+
 # ── Routes ─────────────────────────────────────────────────────────────────
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "rag_decisions": count_decisions()}
+    return {"status": "ok"}
 
 
 @app.post("/scan")
-async def start_scan(req: ScanRequest):
+async def start_scan(req: ScanRequest, user: dict = Depends(require_scanner)):
     """
     Register a new scan run immediately and return run_id.
     Persists the run to SQLite straight away so it survives restarts.
     """
+    check_project(user, req.projectId)
+    if req.autoApproveBelow != "none" and user["role"] == "DEVOPS_ENGINEER":
+        raise HTTPException(status_code=403, detail="Your role cannot auto-approve findings")
     run_id = str(uuid.uuid4())
     meta = req.model_dump()
 
@@ -523,46 +613,39 @@ async def start_scan(req: ScanRequest):
 
 
 @app.get("/run/{run_id}")
-def get_run(run_id: str):
-    """Poll current run state (fallback when SSE not available)."""
-    snap = _run_snapshot(run_id)
-    if not snap:
-        raise HTTPException(status_code=404, detail="Run not found")
-    return snap
+def get_run(run_id: str, user: dict = Depends(require_auth)):
+    return safe_snapshot(user, run_id)
 
 
 @app.get("/run/{run_id}/stream")
-async def stream_run(run_id: str):
-    """SSE stream — pushes events as the agent progresses."""
-    if run_id not in RUNS and not db_get_run(run_id):
-        raise HTTPException(status_code=404, detail="Run not found")
+async def stream_run(run_id: str, request: Request, user: dict = Depends(require_auth)):
+    check_run(user, run_id)
+    token = _get_token(request, await _bearer(request))
 
     async def _generator() -> AsyncGenerator[dict, None]:
-        run = RUNS[run_id]
-        sent = 0
-        while True:
-            events = run["events"]
-            while sent < len(events):
-                yield {"data": json.dumps(events[sent])}
-                sent += 1
-
-            if run["status"] in ("completed", "error"):
-                break
-
+        previous = None
+        while not await request.is_disconnected():
+            current = get_session_user(token) if token else None
+            if not current:
+                return
+            try:
+                snapshot = safe_snapshot(current, run_id)
+            except HTTPException:
+                return
+            payload = json.dumps(snapshot)
+            if payload != previous:
+                yield {"data": payload}
+                previous = payload
+            if snapshot.get("status") in ("completed", "error"):
+                return
             await asyncio.sleep(0.3)
-
-        # Final flush
-        events = run["events"]
-        while sent < len(events):
-            yield {"data": json.dumps(events[sent])}
-            sent += 1
-
     return EventSourceResponse(_generator())
 
 
 @app.post("/run/{run_id}/decision")
-def submit_decision(run_id: str, req: DecisionRequest, background_tasks: BackgroundTasks):
+def submit_decision(run_id: str, req: DecisionRequest, background_tasks: BackgroundTasks, user: dict = Depends(require_reviewer)):
     """Submit a human decision to resume the approval gate."""
+    check_run(user, run_id)
     if run_id not in RUNS:
         raise HTTPException(status_code=404, detail="Run not found")
 
@@ -592,13 +675,13 @@ def submit_decision(run_id: str, req: DecisionRequest, background_tasks: Backgro
 
 
 @app.get("/scans")
-def list_scans():
+def list_scans(project_id: str | None = None, user: dict = Depends(require_auth)):
     """Return past scan summaries for the dashboard table — sourced from SQLite."""
-    return get_scan_summaries()
+    return get_scan_summaries(project_ids=accessible_projects(user, project_id))
 
 
 @app.get("/scan-image/stream")
-async def scan_image_stream(imageRef: str):
+async def scan_image_stream(imageRef: str, projectId: str, user: dict = Depends(require_scanner)):
     """
     SSE stream: runs Trivy against imageRef and emits progress events.
 
@@ -607,6 +690,7 @@ async def scan_image_stream(imageRef: str):
       {"type": "done",   "trivyJson": {...}, "totalVulnerabilities": N}
       {"type": "error",  "detail": "<message>"}
     """
+    check_project(user, projectId)
     async def _generate() -> AsyncGenerator[dict, None]:
         tmp_path = None
         try:
@@ -663,11 +747,12 @@ async def scan_image_stream(imageRef: str):
 
 
 @app.post("/scan-image")
-def scan_image(req: ImageScanRequest):
+def scan_image(req: ImageScanRequest, user: dict = Depends(require_scanner)):
     """
     Blocking version — runs Trivy and returns findings in one shot.
     Used as fallback when SSE is not available.
     """
+    check_project(user, req.projectId)
     try:
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
             tmp_path = tmp.name
@@ -719,10 +804,11 @@ def scan_image(req: ImageScanRequest):
 
 
 @app.get("/stats")
-def get_stats():
+def get_stats(project_id: str | None = None, user: dict = Depends(require_auth)):
     """Return aggregate stats for the dashboard header — sourced from SQLite."""
-    stats = get_dashboard_stats()
-    stats["ragDecisions"] = count_decisions()
+    project_ids = accessible_projects(user, project_id)
+    stats = get_dashboard_stats(project_ids)
+    stats["ragDecisions"] = count_decisions(project_ids)
     return stats
 
 
@@ -737,42 +823,6 @@ def _elapsed(started_at: str) -> str:
         return f"{secs // 60}m {secs % 60}s"
     except Exception:
         return "—"
-
-
-# ── Auth dependency ────────────────────────────────────────────────────────
-
-_bearer = HTTPBearer(auto_error=False)
-
-
-def _get_token(
-    req: Request,
-    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
-) -> str | None:
-    """Extract bearer token from Authorization header or sct_token cookie."""
-    if creds:
-        return creds.credentials
-    return req.cookies.get("sct_token")
-
-
-def require_auth(
-    req: Request,
-    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
-) -> dict:
-    """Dependency: returns the current user or raises 401."""
-    token = _get_token(req, creds)
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = get_session_user(token)
-    if not user:
-        raise HTTPException(status_code=401, detail="Session expired or invalid")
-    return user
-
-
-def require_admin(current_user: dict = Depends(require_auth)) -> dict:
-    """Dependency: current user must be ADMIN."""
-    if current_user["role"] != "ADMIN":
-        raise HTTPException(status_code=403, detail="Admin access required")
-    return current_user
 
 
 # ── Auth request/response models ───────────────────────────────────────────
@@ -798,7 +848,9 @@ class UpdateUserRequest(BaseModel):
 
 def _safe_user(u: dict) -> dict:
     """Strip password_hash before returning user to client."""
-    return {k: v for k, v in u.items() if k != "password_hash"}
+    result = {k: v for k, v in u.items() if k != "password_hash"}
+    result["avatarInitials"] = "".join(part[0] for part in u["name"].split()[:2]).upper()
+    return result
 
 
 # ── Auth routes ────────────────────────────────────────────────────────────
@@ -841,15 +893,15 @@ def auth_me(current_user: dict = Depends(require_auth)):
     return _safe_user(current_user)
 
 
-# ── User management routes (ADMIN only) ────────────────────────────────────
+# ── User management routes (SUPER_ADMIN only) ────────────────────────────────────
 
 @app.get("/users")
-def users_list(_admin: dict = Depends(require_admin)):
+def users_list(_admin: dict = Depends(require_super_admin)):
     return [_safe_user(u) for u in list_users()]
 
 
 @app.post("/users", status_code=201)
-def users_create(req: CreateUserRequest, _admin: dict = Depends(require_admin)):
+def users_create(req: CreateUserRequest, _admin: dict = Depends(require_super_admin)):
     if req.role not in VALID_ROLES:
         raise HTTPException(status_code=422, detail=f"Invalid role. Valid: {sorted(VALID_ROLES)}")
     try:
@@ -863,14 +915,14 @@ def users_create(req: CreateUserRequest, _admin: dict = Depends(require_admin)):
 def users_update(
     user_id: str,
     req: UpdateUserRequest,
-    current_admin: dict = Depends(require_admin),
+    current_admin: dict = Depends(require_super_admin),
 ):
     # Prevent admin from deactivating themselves
     if user_id == current_admin["id"] and req.is_active is False:
         raise HTTPException(status_code=400, detail="Cannot deactivate your own account")
-    if user_id == current_admin["id"] and req.role is not None and req.role != "ADMIN":
-        raise HTTPException(status_code=400, detail="Cannot change your own admin role")
-    if req.role and req.role not in VALID_ROLES:
+    if user_id == current_admin["id"] and req.role is not None and req.role != "SUPER_ADMIN":
+        raise HTTPException(status_code=400, detail="Cannot change your own super admin role")
+    if req.role is not None and req.role not in VALID_ROLES:
         raise HTTPException(status_code=422, detail=f"Invalid role. Valid: {sorted(VALID_ROLES)}")
     updated = update_user(
         user_id,
@@ -885,9 +937,52 @@ def users_update(
 
 
 @app.delete("/users/{user_id}", status_code=204)
-def users_delete(user_id: str, current_admin: dict = Depends(require_admin)):
+def users_delete(user_id: str, current_admin: dict = Depends(require_super_admin)):
     if user_id == current_admin["id"]:
         raise HTTPException(status_code=400, detail="Cannot delete your own account")
     if not get_user_by_id(user_id):
         raise HTTPException(status_code=404, detail="User not found")
     delete_user(user_id)
+
+
+class CreateProjectRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=1000)
+
+
+class ProjectMembersRequest(BaseModel):
+    user_ids: list[str]
+
+
+@app.get("/projects")
+def projects_list(user: dict = Depends(require_auth)):
+    return list_projects(user)
+
+
+@app.post("/projects", status_code=201)
+def projects_create(req: CreateProjectRequest, user: dict = Depends(require_super_admin)):
+    if not req.name.strip():
+        raise HTTPException(status_code=422, detail="Project name is required")
+    return create_project(req.name.strip(), req.description.strip())
+
+
+@app.get("/projects/{project_id}")
+def projects_get(project_id: str, user: dict = Depends(require_auth)):
+    check_project(user, project_id)
+    return get_project(project_id)
+
+
+@app.get("/projects/{project_id}/members")
+def projects_members(project_id: str, user: dict = Depends(require_super_admin)):
+    check_project(user, project_id)
+    return {"user_ids": project_member_ids(project_id)}
+
+
+@app.put("/projects/{project_id}/members")
+def projects_members_update(project_id: str, req: ProjectMembersRequest, user: dict = Depends(require_super_admin)):
+    check_project(user, project_id)
+    try:
+        set_project_members(project_id, req.user_ids)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error))
+    return {"user_ids": project_member_ids(project_id)}

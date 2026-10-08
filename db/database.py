@@ -143,7 +143,28 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
             CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+            CREATE TABLE IF NOT EXISTS projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS project_members (
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                PRIMARY KEY (project_id, user_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_members_user ON project_members(user_id);
+            CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY);
+            CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project_id);
         """)
+
+        # Preserve historical scans as projects; membership starts empty (fail closed).
+        conn.execute("""INSERT OR IGNORE INTO projects (id, name, created_at)
+                        SELECT project_id, CASE WHEN project_id='' THEN 'Legacy project' ELSE project_id END,
+                               MIN(started_at) FROM runs GROUP BY project_id""")
+        if "project_scoped" not in {row[1] for row in conn.execute("PRAGMA table_info(runs)")}:
+            conn.execute("ALTER TABLE runs ADD COLUMN project_scoped INTEGER NOT NULL DEFAULT 0")
 
 
 # ── Run CRUD ───────────────────────────────────────────────────────────────
@@ -168,6 +189,7 @@ def create_run(
                 datetime.now(timezone.utc).isoformat(),
             ),
         )
+        conn.execute("UPDATE runs SET project_scoped=1 WHERE run_id=?", (run_id,))
 
 
 def update_run_status(run_id: str, status: str, error: str | None = None) -> None:
@@ -333,26 +355,31 @@ def get_agent_steps(run_id: str) -> list[dict]:
 
 # ── Dashboard aggregates ───────────────────────────────────────────────────
 
-def get_dashboard_stats() -> dict:
+def project_filter(project_ids: list[str] | None, column: str = "project_id") -> tuple[str, list[str]]:
+    if project_ids is None:
+        return "1=1", []
+    if not project_ids:
+        return "1=0", []
+    return f"{column} IN ({','.join('?' for _ in project_ids)})", project_ids
+
+
+def get_dashboard_stats(project_ids: list[str] | None = None) -> dict:
+    where, args = project_filter(project_ids, "r.project_id")
     with get_conn() as conn:
-        total_scans = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
-        total_cves  = conn.execute("SELECT COUNT(*) FROM cves").fetchone()[0]
-        approved    = conn.execute(
-            "SELECT COUNT(*) FROM cves WHERE status='approved'"
-        ).fetchone()[0]
-        rate = round((approved / total_cves * 100) if total_cves else 0)
-        return {
-            "totalScans":      total_scans,
-            "cvesTriaged":     total_cves,
-            "avgApprovalRate": rate,
-            "ragFirstPassRate": rate,
-        }
+        total_scans = conn.execute(f"SELECT COUNT(*) FROM runs r WHERE {where}", args).fetchone()[0]
+        row = conn.execute(f"""SELECT COUNT(*), COALESCE(SUM(c.status='approved'),0)
+                              FROM cves c JOIN runs r ON r.run_id=c.run_id WHERE {where}""", args).fetchone()
+        total_cves, approved = row
+        rate = round(approved / total_cves * 100) if total_cves else 0
+        return {"totalScans": total_scans, "cvesTriaged": total_cves,
+                "avgApprovalRate": rate, "ragFirstPassRate": rate}
 
 
-def get_scan_summaries(limit: int = 50) -> list[dict]:
+def get_scan_summaries(limit: int = 50, project_ids: list[str] | None = None) -> list[dict]:
+    where, args = project_filter(project_ids)
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM runs ORDER BY started_at DESC LIMIT ?", (limit,)
+            f"SELECT * FROM runs WHERE {where} ORDER BY started_at DESC LIMIT ?", (*args, limit)
         ).fetchall()
         result = []
         for r in rows:
@@ -393,7 +420,7 @@ def get_scan_summaries(limit: int = 50) -> list[dict]:
 
 # ── User CRUD ──────────────────────────────────────────────────────────────
 
-VALID_ROLES = {"ADMIN", "DEVOPS_ENGINEER", "CYBER_MANAGER"}
+VALID_ROLES = {"SUPER_ADMIN", "ADMIN", "DEVOPS_ENGINEER", "CYBER_MANAGER"}
 SESSION_TTL_HOURS = 24
 
 
@@ -525,8 +552,69 @@ def seed_admin(
     with get_conn() as conn:
         count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     if count == 0:
-        create_user(email=email, name=name, password=password, role="ADMIN")
+        create_user(email=email, name=name, password=password, role="SUPER_ADMIN")
         import logging
         logging.getLogger("control_tower").info(
             "Seeded default admin: %s / %s", email, password
         )
+
+
+def migrate_super_admin() -> None:
+    """One-time bootstrap: promote only the configured, existing admin account."""
+    email = os.getenv("SUPER_ADMIN_EMAIL", "admin@controltower.local").lower()
+    with get_conn() as conn:
+        if conn.execute("SELECT 1 FROM schema_migrations WHERE name='project_access_v1'").fetchone():
+            return
+        if not conn.execute("SELECT 1 FROM users WHERE role='SUPER_ADMIN' AND is_active=1").fetchone():
+            cursor = conn.execute("UPDATE users SET role='SUPER_ADMIN' WHERE email=? AND role='ADMIN' AND is_active=1", (email,))
+            if not cursor.rowcount:
+                raise RuntimeError("Set SUPER_ADMIN_EMAIL to an existing active admin before enabling project access")
+        conn.execute("INSERT INTO schema_migrations(name) VALUES ('project_access_v1')")
+
+
+def list_projects(user: dict) -> list[dict]:
+    with get_conn() as conn:
+        if user["role"] == "SUPER_ADMIN":
+            rows = conn.execute("SELECT * FROM projects ORDER BY name, id").fetchall()
+        else:
+            rows = conn.execute("""SELECT p.* FROM projects p JOIN project_members m ON p.id=m.project_id
+                                   WHERE m.user_id=? ORDER BY p.name, p.id""", (user["id"],)).fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_project(project_id: str) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def has_project_access(user: dict, project_id: str) -> bool:
+    with get_conn() as conn:
+        if user["role"] == "SUPER_ADMIN":
+            return conn.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone() is not None
+        return conn.execute("SELECT 1 FROM project_members WHERE project_id=? AND user_id=?", (project_id, user["id"])).fetchone() is not None
+
+
+def create_project(name: str, description: str = "") -> dict:
+    project_id = str(uuid_gen())
+    with get_conn() as conn:
+        conn.execute("INSERT INTO projects(id,name,description,created_at) VALUES (?,?,?,?)",
+                     (project_id, name, description, datetime.now(timezone.utc).isoformat()))
+    return get_project(project_id)
+
+
+def project_member_ids(project_id: str) -> list[str]:
+    with get_conn() as conn:
+        return [row[0] for row in conn.execute("SELECT user_id FROM project_members WHERE project_id=?", (project_id,))]
+
+
+def set_project_members(project_id: str, user_ids: list[str]) -> None:
+    with get_conn() as conn:
+        if not conn.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
+            raise ValueError("Project not found")
+        for user_id in set(user_ids):
+            if not conn.execute("SELECT 1 FROM users WHERE id=? AND role!='SUPER_ADMIN'", (user_id,)).fetchone():
+                raise ValueError("Select valid non-super-admin accounts")
+        conn.execute("DELETE FROM project_members WHERE project_id=?", (project_id,))
+        conn.executemany("INSERT INTO project_members(project_id,user_id) VALUES (?,?)",
+                         [(project_id, user_id) for user_id in set(user_ids)])

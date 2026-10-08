@@ -1,6 +1,6 @@
 // ── Auth / RBAC ────────────────────────────────────────────────────────────
 
-export type UserRole = "ADMIN" | "DEVOPS_ENGINEER" | "CYBER_MANAGER";
+export type UserRole = "SUPER_ADMIN" | "ADMIN" | "DEVOPS_ENGINEER" | "CYBER_MANAGER";
 
 export interface User {
   id: string;
@@ -15,22 +15,26 @@ export interface RolePermissions {
   canScan: boolean;       // start new scans
   canApprove: boolean;    // approve / reject CVEs
   canViewSettings: boolean; // access settings page
-  canManageUsers: boolean;  // user management (admin only)
+  canManageProjects: boolean;
+  canManageUsers: boolean;  // user management (super admin only)
 }
 
 export const ROLE_PERMISSIONS: Record<UserRole, RolePermissions> = {
-  ADMIN:           { canScan: true,  canApprove: true,  canViewSettings: true,  canManageUsers: true  },
-  DEVOPS_ENGINEER: { canScan: true,  canApprove: false, canViewSettings: false, canManageUsers: false },
-  CYBER_MANAGER:   { canScan: false, canApprove: true,  canViewSettings: true,  canManageUsers: false },
+  SUPER_ADMIN:     { canScan: true, canApprove: true, canViewSettings: true, canManageUsers: true, canManageProjects: true },
+  ADMIN:           { canScan: true,  canApprove: true,  canViewSettings: true,  canManageUsers: false, canManageProjects: false },
+  DEVOPS_ENGINEER: { canScan: true,  canApprove: false, canViewSettings: false, canManageUsers: false, canManageProjects: false },
+  CYBER_MANAGER:   { canScan: false, canApprove: true,  canViewSettings: true,  canManageUsers: false, canManageProjects: false },
 };
 
 export const ROLE_LABELS: Record<UserRole, string> = {
+  SUPER_ADMIN:     "Super Admin",
   ADMIN:           "Admin",
   DEVOPS_ENGINEER: "DevOps Engineer",
   CYBER_MANAGER:   "Cyber Manager",
 };
 
 export const ROLE_COLORS: Record<UserRole, { bg: string; text: string; border: string }> = {
+  SUPER_ADMIN:     { bg: "rgba(240,136,62,0.12)", text: "var(--accent-orange)", border: "var(--border2)" },
   ADMIN:           { bg: "rgba(124,92,216,0.12)", text: "#7c5cd8", border: "rgba(124,92,216,0.25)" },
   DEVOPS_ENGINEER: { bg: "rgba(68,147,248,0.12)", text: "#4493f8", border: "rgba(68,147,248,0.25)" },
   CYBER_MANAGER:   { bg: "rgba(34,197,94,0.12)",  text: "#22c55e", border: "rgba(34,197,94,0.25)"  },

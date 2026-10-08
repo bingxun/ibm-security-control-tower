@@ -14,6 +14,7 @@ load_dotenv()
 
 from mcp.server.fastmcp import FastMCP
 from rag.store import query_memory, persist_decision, count_decisions
+from db.database import get_session_user, has_project_access, list_projects
 
 mcp = FastMCP(
     name="control-tower-rag",
@@ -26,12 +27,21 @@ mcp = FastMCP(
 )
 
 
+def _project_user(session_token: str, project_id: str | None = None) -> dict:
+    user = get_session_user(session_token)
+    if not user or (project_id is not None and not has_project_access(user, project_id)):
+        raise ValueError("Not authenticated or project not assigned")
+    return user
+
+
 @mcp.tool()
 def query_memory_tool(
     cve_id: str,
     description: str,
     severity: str,
     top_k: int = 5,
+    project_id: str | None = None,
+    session_token: str = "",
 ) -> list[dict]:
     """
     Search the RAG memory store for past decisions similar to the given CVE.
@@ -46,11 +56,13 @@ def query_memory_tool(
         List of matching decisions, each with:
         cve_id, project_id, rationale, approver, decision, score (0-100)
     """
+    _project_user(session_token, project_id)
     return query_memory(
         cve_id=cve_id,
         description=description,
         severity=severity,
         top_k=top_k,
+        project_id=project_id,
     )
 
 
@@ -62,6 +74,7 @@ def persist_decision_tool(
     rationale: str,
     approver: str,
     decision: str,
+    session_token: str = "",
 ) -> dict:
     """
     Persist an approved or rejected CVE decision to the RAG memory store.
@@ -78,26 +91,31 @@ def persist_decision_tool(
     Returns:
         {"id": "<record_id>", "stored": true}
     """
+    user = _project_user(session_token, project_id)
+    if user["role"] not in {"SUPER_ADMIN", "ADMIN", "CYBER_MANAGER"}:
+        raise ValueError("Your role cannot persist decisions")
     record_id = persist_decision(
         cve_id=cve_id,
         project_id=project_id,
         severity=severity,
         rationale=rationale,
-        approver=approver,
+        approver=user["name"],
         decision=decision,
     )
     return {"id": record_id, "stored": True}
 
 
 @mcp.tool()
-def memory_stats_tool() -> dict:
+def memory_stats_tool(session_token: str = "") -> dict:
     """
     Return statistics about the RAG memory store.
 
     Returns:
         {"total_decisions": int}
     """
-    return {"total_decisions": count_decisions()}
+    user = _project_user(session_token)
+    project_ids = None if user["role"] == "SUPER_ADMIN" else [p["id"] for p in list_projects(user)]
+    return {"total_decisions": count_decisions(project_ids)}
 
 
 @mcp.tool()

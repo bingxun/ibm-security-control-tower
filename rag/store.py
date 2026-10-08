@@ -70,6 +70,7 @@ def persist_decision(
         "approver": approver,
         "decision": decision,
         "embedding": vector,
+        "project_scoped": True,
     }
 
     records = _load()
@@ -83,12 +84,13 @@ def query_memory(
     description: str,
     severity: str,
     top_k: int = TOP_K,
+    project_id: str | None = None,
 ) -> list[dict]:
     """
     Return top-k similar past decisions above the similarity threshold.
     Each result: {cve_id, project_id, rationale, approver, decision, score}
     """
-    records = _load()
+    records = [r for r in _load() if project_id is not None and r.get("project_id") == project_id and r.get("project_scoped")]
     if not records:
         return []
 
@@ -119,6 +121,6 @@ def query_memory(
     ]
 
 
-def count_decisions() -> int:
+def count_decisions(project_ids: list[str] | None = None) -> int:
     """Return total number of persisted decisions."""
-    return len(_load())
+    return sum(1 for r in _load() if project_ids is None or r.get("project_id") in project_ids)

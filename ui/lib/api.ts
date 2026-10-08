@@ -112,8 +112,8 @@ async function get<T>(path: string): Promise<T> {
 // ── API calls ──────────────────────────────────────────────────────────────
 
 /** Run Trivy against a remote image on the backend. Returns the raw trivyJson. */
-export async function scanImage(imageRef: string): Promise<{ trivyJson: object; totalVulnerabilities: number }> {
-  return post("/scan-image", { imageRef });
+export async function scanImage(imageRef: string, projectId: string): Promise<{ trivyJson: object; totalVulnerabilities: number }> {
+  return post("/scan-image", { imageRef, projectId });
 }
 
 export type TrivyScanEvent =
@@ -127,33 +127,17 @@ export type TrivyScanEvent =
  */
 export function streamScanImage(
   imageRef: string,
+  projectId: string,
   onEvent: (e: TrivyScanEvent) => void,
   onDone: (trivyJson: object, total: number) => void,
   onError: (msg: string) => void,
 ): () => void {
-  const url = `${BASE}/scan-image/stream?imageRef=${encodeURIComponent(imageRef)}`;
-  const es = new EventSource(url);
-
-  es.onmessage = (e) => {
-    try {
-      const data = JSON.parse(e.data) as TrivyScanEvent;
-      onEvent(data);
-      if (data.type === "done") {
-        es.close();
-        onDone(data.trivyJson, data.totalVulnerabilities);
-      } else if (data.type === "error") {
-        es.close();
-        onError(data.detail);
-      }
-    } catch { /* ignore malformed lines */ }
-  };
-
-  es.onerror = () => {
-    es.close();
-    onError("SSE connection lost");
-  };
-
-  return () => es.close();
+  return authenticatedStream(`/scan-image/stream?imageRef=${encodeURIComponent(imageRef)}&projectId=${encodeURIComponent(projectId)}`, (data) => {
+    const event = data as TrivyScanEvent;
+    onEvent(event);
+    if (event.type === "done") onDone(event.trivyJson, event.totalVulnerabilities);
+    if (event.type === "error") onError(event.detail);
+  }, () => {}, (error) => onError(error.message));
 }
 
 /** Start a new scan run. Returns the run_id. */
@@ -175,13 +159,13 @@ export async function submitDecision(
 }
 
 /** Fetch past scan summaries for the dashboard. */
-export async function listScans(): Promise<ScanSummary[]> {
-  return get("/scans");
+export async function listScans(projectId?: string): Promise<ScanSummary[]> {
+  return get(`/scans${projectId === undefined ? "" : `?project_id=${encodeURIComponent(projectId)}`}`);
 }
 
 /** Fetch dashboard aggregate stats. */
-export async function getDashboardStats(): Promise<DashboardStats> {
-  return get("/stats");
+export async function getDashboardStats(projectId?: string): Promise<DashboardStats> {
+  return get(`/stats${projectId === undefined ? "" : `?project_id=${encodeURIComponent(projectId)}`}`);
 }
 
 /**
@@ -195,27 +179,9 @@ export function streamRun(
   onDone: () => void,
   onError: (err: Error) => void
 ): () => void {
-  const es = new EventSource(`${BASE}/run/${runId}/stream`);
-
-  es.onmessage = (e) => {
-    try {
-      const data = JSON.parse(e.data) as Partial<ScanRun>;
-      onEvent(data);
-      if (data.status === "completed" || data.status === "error") {
-        es.close();
-        onDone();
-      }
-    } catch {
-      // non-JSON keepalive lines — ignore
-    }
-  };
-
-  es.onerror = () => {
-    es.close();
-    onError(new Error("SSE stream disconnected"));
-  };
-
-  return () => es.close();
+  return authenticatedStream(`/run/${encodeURIComponent(runId)}/stream`, (data) => {
+    onEvent(data as Partial<ScanRun>);
+  }, onDone, onError);
 }
 
 
@@ -253,7 +219,7 @@ export async function apiMe(): Promise<User> {
   return get<User>("/auth/me");
 }
 
-// ── User management API (ADMIN only) ──────────────────────────────────────
+// ── User management API (SUPER_ADMIN only) ──────────────────────────────────────
 
 export interface CreateUserPayload {
   email:    string;
@@ -294,7 +260,7 @@ async function userRequest<T>(path: string, method = "GET", body?: object, signa
   if (!response.ok) {
     const data = await response.json().catch(() => null);
     const fallback = response.status === 401 ? "Your session has expired. Please sign in again."
-      : response.status === 403 ? "Only administrators can manage users."
+      : response.status === 403 ? "Only super admins can manage users and project assignments."
       : "Unable to save or load users. Please try again.";
     throw new Error(typeof data?.detail === "string" ? data.detail : fallback);
   }
@@ -315,4 +281,47 @@ export async function updatePlatformUser(userId: string, payload: UpdateUserPayl
 
 export async function deletePlatformUser(userId: string): Promise<void> {
   return userRequest<void>(`/users/${encodeURIComponent(userId)}`, "DELETE");
+}
+
+
+// Fetch-based SSE carries the Bearer token without exposing it in URLs.
+function authenticatedStream(path: string, onEvent: (data: unknown) => void, onDone: () => void, onError: (error: Error) => void): () => void {
+  const controller = new AbortController();
+  void (async () => {
+    try {
+      const response = await fetch(`${BASE}${path}`, { headers: authHeaders(), signal: controller.signal });
+      if (!response.ok || !response.body) throw new Error(`Stream unavailable (${response.status})`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (!controller.signal.aborted) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let boundary: RegExpExecArray | null;
+        while ((boundary = /\r?\n\r?\n/.exec(buffer))) {
+          const frame = buffer.slice(0, boundary.index);
+          buffer = buffer.slice(boundary.index + boundary[0].length);
+          const data = frame.split(/\r?\n/).filter(line => line.startsWith("data:")).map(line => line.slice(5).trimStart()).join("\n");
+          if (data && !controller.signal.aborted) onEvent(JSON.parse(data));
+        }
+      }
+      if (!controller.signal.aborted) onDone();
+    } catch (error) {
+      if (!controller.signal.aborted) onError(error instanceof Error ? error : new Error("Stream failed"));
+    }
+  })();
+  return () => controller.abort();
+}
+
+export interface Project { id: string; name: string; description: string; created_at: string; }
+export function listProjects(): Promise<Project[]> { return userRequest("/projects"); }
+export function createProject(name: string, description: string): Promise<Project> {
+  return userRequest("/projects", "POST", { name, description });
+}
+export function getProjectMembers(projectId: string): Promise<{ user_ids: string[] }> {
+  return userRequest(`/projects/${encodeURIComponent(projectId)}/members`);
+}
+export function saveProjectMembers(projectId: string, user_ids: string[]): Promise<{ user_ids: string[] }> {
+  return userRequest(`/projects/${encodeURIComponent(projectId)}/members`, "PUT", { user_ids });
 }

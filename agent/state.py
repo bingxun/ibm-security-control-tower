@@ -38,7 +38,8 @@ class AgentState(TypedDict):
     project_id: str
     cis_profile: str
     severity_threshold: str    # critical | high | medium | low — filter applied at ingest
-    trivy_json: dict           # raw Trivy JSON blob
+    scanner: str               # trivy | grype — determines JSON parser in ingest node
+    scan_json: dict            # raw scanner JSON (Trivy or Grype format)
 
     # ── Pipeline state ─────────────────────────────────────────────────────
     cves: list[CveRecord]          # populated by ingest node
