@@ -80,6 +80,34 @@ export function StatusChip({ status, approved, total }: { status: string; approv
   );
 }
 
+export type ScanStatus =
+  | "queued"
+  | "scanning"
+  | "running"
+  | "awaiting_approval"
+  | "completed"
+  | "error";
+
+export function RunStatusBadge({ status }: { status: ScanStatus }) {
+  const styles: Record<ScanStatus, { bg: string; color: string; label: string; pulse?: boolean }> = {
+    queued:            { bg: "var(--surface2)",        color: "var(--dim)",           label: "Queued" },
+    scanning:          { bg: "var(--accent-blue-bg)",   color: "var(--accent-blue)",   label: "Scanning…", pulse: true },
+    running:           { bg: "var(--accent-purple-bg)", color: "var(--accent-purple)", label: "Running" },
+    awaiting_approval: { bg: "rgba(210,153,34,0.15)",   color: "var(--accent-yellow)", label: "Awaiting Review" },
+    completed:         { bg: "var(--accent-green-bg)",  color: "var(--accent-green)",  label: "Completed" },
+    error:             { bg: "var(--accent-red-bg)",    color: "var(--accent-red)",    label: "Error" },
+  };
+  const s = styles[status];
+  return (
+    <span
+      className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wide inline-flex items-center gap-1 ${s.pulse ? "animate-pulse" : ""}`}
+      style={{ background: s.bg, color: s.color }}
+    >
+      {s.label}
+    </span>
+  );
+}
+
 export function ChipVariant({
   label,
   variant,

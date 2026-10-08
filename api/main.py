@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 import tempfile
 import time
 import traceback
@@ -22,6 +23,13 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import AsyncGenerator, Optional
+
+# Windows defaults to ProactorEventLoop, which supports subprocesses; something
+# in the uvicorn --reload process chain can leave the SelectorEventLoop active
+# instead, which raises NotImplementedError on any asyncio subprocess call
+# (e.g. the Trivy scan below). Force Proactor explicitly before the loop starts.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 logger = logging.getLogger("control_tower")
 
@@ -170,6 +178,8 @@ def _run_snapshot(run_id: str) -> dict:
                 "impact":       c.get("impact", ""),
                 "description":  c.get("description", ""),
                 "rationale":    c.get("rationale", ""),
+                "remediation":  c.get("remediation", ""),
+                "edited":       bool(c.get("edited", False)),
                 "ragMatch":     c.get("rag_match"),
                 "status":       c.get("status", "queued"),
             }
@@ -220,6 +230,8 @@ def _run_snapshot(run_id: str) -> dict:
             "impact":       c.get("impact", ""),
             "description":  c.get("description", ""),
             "rationale":    c.get("rationale", ""),
+            "remediation":  c.get("remediation", ""),
+            "edited":       bool(c.get("edited", False)),
             "ragMatch":     c.get("rag_match"),
             "status":       c.get("status", "queued"),
         }

@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
-import { SevBadge, StatusChip } from "@/components/Badges";
+import { SevBadge, StatusChip, RunStatusBadge } from "@/components/Badges";
 import { listScans, ScanSummary } from "@/lib/api";
 
 interface ImageRow {
@@ -139,15 +139,16 @@ function ProjectPageInner() {
               {/* Table header + rows */}
               {name && !loading && !error && images.length > 0 && (
               <div className="overflow-x-auto">
-              <div className="min-w-[720px]">
+              <div className="min-w-[840px]">
               <div
                 className="grid grid-cols-12 px-5 py-3 text-[11px] font-semibold uppercase tracking-wider"
                 style={{ borderBottom: "1px solid var(--border)", color: "var(--muted)" }}
               >
-                <div className="col-span-5">Image</div>
-                <div className="col-span-3">Findings</div>
-                <div className="col-span-3">Approval</div>
-                <div className="col-span-1 text-right">Date</div>
+                <div className="col-span-4">Image</div>
+                <div className="col-span-2">Findings</div>
+                <div className="col-span-2">Approval</div>
+                <div className="col-span-2">Scan Progress</div>
+                <div className="col-span-2 text-right">Date</div>
               </div>
 
               {images.map((row, i) => (
@@ -162,7 +163,7 @@ function ProjectPageInner() {
                   onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                 >
                   {/* Image */}
-                  <div className="col-span-5 min-w-0">
+                  <div className="col-span-4 min-w-0">
                     <p
                       className="text-[12px] font-mono truncate"
                       style={{ color: "var(--body)" }}
@@ -175,7 +176,7 @@ function ProjectPageInner() {
                   </div>
 
                   {/* Findings */}
-                  <div className="col-span-3">
+                  <div className="col-span-2">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <SevBadge label="C" count={row.scan.critical} color="var(--accent-red)"    />
                       <SevBadge label="H" count={row.scan.high}     color="var(--accent-orange)" />
@@ -187,7 +188,7 @@ function ProjectPageInner() {
                   </div>
 
                   {/* Approval bar */}
-                  <div className="col-span-3">
+                  <div className="col-span-2">
                     <StatusChip
                       status={row.scan.status}
                       approved={row.scan.approved}
@@ -200,8 +201,13 @@ function ProjectPageInner() {
                     )}
                   </div>
 
+                  {/* Scan Progress */}
+                  <div className="col-span-2">
+                    <RunStatusBadge status={row.scan.status} />
+                  </div>
+
                   {/* Date */}
-                  <div className="col-span-1 text-right">
+                  <div className="col-span-2 text-right">
                     <span className="text-[11px]" style={{ color: "var(--muted)" }}>
                       {row.scan.date}
                     </span>

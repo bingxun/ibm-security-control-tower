@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import CveQueue from "@/components/CveQueue";
 import CveReview from "@/components/CveReview";
@@ -292,7 +293,12 @@ function ReviewPageInner() {
     setCves((prev) =>
       prev.map((c) =>
         c.id === id
-          ? { ...c, status: decision, rationale: editedRationale ?? c.rationale }
+          ? {
+              ...c,
+              status: decision,
+              rationale: editedRationale ?? c.rationale,
+              edited: editedRationale ? true : c.edited,
+            }
           : c
       )
     );
@@ -370,7 +376,7 @@ function ReviewPageInner() {
         </div>
       )}
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 min-h-0 overflow-hidden">
         {runError ? (
           /* ── Run lost / error screen ── */
           <div className="flex-1 flex flex-col items-center justify-center gap-4 px-8">
@@ -460,15 +466,32 @@ function ReviewPageInner() {
               onSelect={setSelectedId}
             />
             {selectedCve && (
-              <CveReview
-                cve={selectedCve}
-                agentSteps={agentSteps}
-                tokenFragment={tokenFragment}
-                totalCves={cves.length}
-                reviewedCount={reviewedCount}
-                approvedCount={liveStats.approved}
-                onDecision={handleDecision}
-              />
+              <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+                <div
+                  className="flex items-center px-8 py-3 flex-shrink-0"
+                  style={{ background: "var(--bg)", borderBottom: "1px solid var(--border)" }}
+                >
+                  <Link
+                    href={projectId ? `/project?name=${encodeURIComponent(projectId)}` : "/dashboard"}
+                    className="flex items-center gap-1.5 text-[12px] font-semibold transition-opacity hover:opacity-70"
+                    style={{ color: "var(--muted)" }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                      <polyline points="15 18 9 12 15 6"/>
+                    </svg>
+                    Back to Images
+                  </Link>
+                </div>
+                <CveReview
+                  cve={selectedCve}
+                  agentSteps={agentSteps}
+                  tokenFragment={tokenFragment}
+                  totalCves={cves.length}
+                  reviewedCount={reviewedCount}
+                  approvedCount={liveStats.approved}
+                  onDecision={handleDecision}
+                />
+              </div>
             )}
             <ContextPanel stats={liveStats} cves={cves} />
           </>

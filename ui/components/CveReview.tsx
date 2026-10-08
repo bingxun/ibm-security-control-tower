@@ -59,7 +59,7 @@ function EditModal({
         >
           <div>
             <p className="text-[14px] font-bold" style={{ color: "var(--heading)" }}>
-              Edit Rationale
+              Edit Justification
             </p>
             <p className="text-[11px] mt-0.5" style={{ color: "var(--muted)" }}>
               {cve.id} · {cve.pkg} {cve.version}
@@ -82,7 +82,7 @@ function EditModal({
             className="block text-[11px] font-semibold uppercase tracking-wider mb-2"
             style={{ color: "var(--muted)" }}
           >
-            Mitigation Rationale
+            Justification
           </label>
           <textarea
             value={draft}
@@ -179,7 +179,7 @@ export default function CveReview({
       )}
 
       <main
-        className="flex-1 overflow-y-auto flex flex-col gap-6 px-8 py-7"
+        className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-6 px-8 py-7"
         style={{ background: "var(--bg)" }}
       >
 
@@ -224,7 +224,7 @@ export default function CveReview({
               <span style={{ color: "var(--dim)" }}>→</span>{" "}
               <span style={{ color: "var(--accent-green)" }}>fix: {cve.fixedIn}</span>
             </p>
-            <p className="text-[13px] mt-1" style={{ color: "var(--muted)" }}>
+            <p className="text-[13px] mt-1 break-words" style={{ color: "var(--muted)" }}>
               {cve.description}
             </p>
           </div>
@@ -251,7 +251,7 @@ export default function CveReview({
           </div>
         </div>
 
-        {/* ── 2. Rationale card ── */}
+        {/* ── 2. Justification card ── */}
         <div
           className="rounded-2xl overflow-hidden"
           style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
@@ -264,8 +264,20 @@ export default function CveReview({
             <div className="flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-[14px] font-bold" style={{ color: "var(--heading)" }}>
-                  Mitigation Rationale
+                  Justification
                 </span>
+                {cve.edited && (
+                  <span
+                    className="text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1"
+                    style={{
+                      background: "var(--accent-blue-bg)",
+                      color: "var(--accent-blue)",
+                      border: "1px solid var(--accent-blue-bdr, var(--border))",
+                    }}
+                  >
+                    ✎ Edited manually
+                  </span>
+                )}
                 {isStub ? (
                   <span
                     className="text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider"
@@ -322,11 +334,11 @@ export default function CveReview({
             )}
           </div>
 
-          {/* Rationale body */}
+          {/* Justification body */}
           <div className="px-6 py-5">
             {displayRationale ? (
               <p
-                className="text-[14px] leading-[1.8] font-normal"
+                className="text-[14px] leading-[1.8] font-normal break-words whitespace-pre-wrap"
                 style={{ color: "var(--body)" }}
               >
                 {displayRationale}
@@ -359,7 +371,7 @@ export default function CveReview({
               >
                 ◈
               </div>
-              <p className="text-[12px] leading-relaxed" style={{ color: "var(--subtle)" }}>
+              <p className="text-[12px] leading-relaxed break-words" style={{ color: "var(--subtle)" }}>
                 <span style={{ color: "var(--accent-purple)" }}>Grounded from memory</span>
                 {" — "}{cve.ragMatch.summary} Approved by{" "}
                 <span style={{ color: "var(--body)" }}>{cve.ragMatch.approver}</span>
@@ -368,89 +380,124 @@ export default function CveReview({
               </p>
             </div>
           )}
+        </div>
 
-          {/* ── Action row ── */}
+        {/* ── 3. Remediation card ── */}
+        <div
+          className="rounded-2xl overflow-hidden"
+          style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+        >
           <div
-            className="flex items-center gap-3 px-6 py-5"
-            style={{ borderTop: "1px solid var(--border)", background: "var(--surface3)" }}
+            className="flex items-center gap-3 px-6 py-4"
+            style={{ borderBottom: "1px solid var(--border)" }}
           >
-            {/* Primary — Accept */}
-            <button
-              onClick={() => onDecision(cve.id, "approved")}
-              className="flex items-center gap-2 px-8 py-3 rounded-xl text-[14px] font-bold transition-all duration-150 hover:opacity-90 active:scale-[0.98]"
-              style={{
-                background: "var(--btn-accept-bg)",
-                color: "var(--btn-accept-text)",
-                boxShadow: "0 0 20px var(--btn-accept-glow)",
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-              Accept
-            </button>
-
-            {/* Secondary — Edit */}
-            <button
-              onClick={() => setEditOpen(true)}
-              className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all duration-150 hover:opacity-80"
-              style={{
-                background: "var(--surface2)",
-                color: "var(--faint)",
-                border: "1px solid var(--border2)",
-              }}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </svg>
-              Edit
-            </button>
-
-            {/* Danger — Reject */}
-            <button
-              onClick={() => onDecision(cve.id, "rejected")}
-              className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all duration-150 hover:opacity-80"
-              style={{
-                background: "var(--accent-red-bg)",
-                color: "var(--accent-red)",
-                border: "1px solid var(--accent-red-bdr)",
-              }}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
-              Reject
-            </button>
-
-            {/* Progress indicator */}
-            <div className="ml-auto flex items-center gap-3">
-              <div className="text-right">
-                <div className="text-[13px] font-semibold" style={{ color: "var(--heading)" }}>
-                  {reviewedCount} <span style={{ color: "var(--dim)" }}>/</span> {totalCves}
-                </div>
-                <div className="text-[11px]" style={{ color: "var(--muted)" }}>
-                  {approvedCount} approved
-                </div>
-              </div>
-              {/* Mini donut */}
-              <svg width="36" height="36" viewBox="0 0 36 36">
-                <circle cx="18" cy="18" r="14" fill="none" stroke="var(--border)" strokeWidth="3" />
-                <circle
-                  cx="18" cy="18" r="14"
-                  fill="none"
-                  stroke="var(--accent-green)"
-                  strokeWidth="3"
-                  strokeDasharray={`${totalCves > 0 ? (reviewedCount / totalCves) * 88 : 0} 88`}
-                  strokeLinecap="round"
-                  transform="rotate(-90 18 18)"
+            <span className="text-[14px] font-bold" style={{ color: "var(--heading)" }}>
+              Remediation
+            </span>
+          </div>
+          <div className="px-6 py-5">
+            {cve.remediation ? (
+              <p
+                className="text-[14px] leading-[1.8] font-normal break-words whitespace-pre-wrap"
+                style={{ color: "var(--body)" }}
+              >
+                {cve.remediation}
+              </p>
+            ) : (
+              <div className="flex items-center gap-3 py-4">
+                <span
+                  className="w-2 h-2 rounded-full animate-pulse"
+                  style={{ background: "var(--accent-green)" }}
                 />
-              </svg>
-            </div>
+                <span className="text-[13px]" style={{ color: "var(--muted)" }}>
+                  Agent is synthesising remediation…
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* ── 3. Agent drawer ── */}
+        {/* ── 4. Action row ── */}
+        <div
+          className="flex items-center gap-3 px-6 py-5 rounded-2xl flex-shrink-0"
+          style={{ border: "1px solid var(--border)", background: "var(--surface3)" }}
+        >
+          {/* Primary — Accept */}
+          <button
+            onClick={() => onDecision(cve.id, "approved")}
+            className="flex items-center gap-2 px-8 py-3 rounded-xl text-[14px] font-bold transition-all duration-150 hover:opacity-90 active:scale-[0.98]"
+            style={{
+              background: "var(--btn-accept-bg)",
+              color: "var(--btn-accept-text)",
+              boxShadow: "0 0 20px var(--btn-accept-glow)",
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            Accept
+          </button>
+
+          {/* Secondary — Edit */}
+          <button
+            onClick={() => setEditOpen(true)}
+            className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all duration-150 hover:opacity-80"
+            style={{
+              background: "var(--surface2)",
+              color: "var(--faint)",
+              border: "1px solid var(--border2)",
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+            </svg>
+            Edit justification
+          </button>
+
+          {/* Danger — Reject */}
+          <button
+            onClick={() => onDecision(cve.id, "rejected")}
+            className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all duration-150 hover:opacity-80"
+            style={{
+              background: "var(--accent-red-bg)",
+              color: "var(--accent-red)",
+              border: "1px solid var(--accent-red-bdr)",
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+            Reject
+          </button>
+
+          {/* Progress indicator */}
+          <div className="ml-auto flex items-center gap-3">
+            <div className="text-right">
+              <div className="text-[13px] font-semibold" style={{ color: "var(--heading)" }}>
+                {reviewedCount} <span style={{ color: "var(--dim)" }}>/</span> {totalCves}
+              </div>
+              <div className="text-[11px]" style={{ color: "var(--muted)" }}>
+                {approvedCount} approved
+              </div>
+            </div>
+            {/* Mini donut */}
+            <svg width="36" height="36" viewBox="0 0 36 36">
+              <circle cx="18" cy="18" r="14" fill="none" stroke="var(--border)" strokeWidth="3" />
+              <circle
+                cx="18" cy="18" r="14"
+                fill="none"
+                stroke="var(--accent-green)"
+                strokeWidth="3"
+                strokeDasharray={`${totalCves > 0 ? (reviewedCount / totalCves) * 88 : 0} 88`}
+                strokeLinecap="round"
+                transform="rotate(-90 18 18)"
+              />
+            </svg>
+          </div>
+        </div>
+
+        {/* ── 5. Agent drawer ── */}
         <AgentDrawer steps={agentSteps} tokenFragment={tokenFragment} />
       </main>
     </>

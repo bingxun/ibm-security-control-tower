@@ -18,7 +18,9 @@ class CveRecord(TypedDict):
     auth_required: str
     impact: str
     description: str
-    rationale: str         # filled by synthesis node
+    rationale: str         # justification text — filled by synthesis node
+    remediation: str       # concrete fix action — filled by synthesis node
+    edited: bool           # True once a human has manually edited the justification
     rag_match: Optional[dict]  # filled by synthesis node
     status: str            # queued | pending | approved | rejected
 

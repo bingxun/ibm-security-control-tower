@@ -43,7 +43,7 @@ export interface ScanSummary {
   medium: number;
   approved: number;
   rejected: number;
-  status: "completed" | "running" | "error";
+  status: "queued" | "scanning" | "running" | "awaiting_approval" | "completed" | "error";
   duration: string;
 }
 

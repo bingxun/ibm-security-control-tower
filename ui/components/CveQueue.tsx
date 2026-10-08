@@ -88,7 +88,7 @@ export default function CveQueue({ cves, selectedId, onSelect }: Props) {
       </div>
 
       {/* ── CVE List ── */}
-      <div className="overflow-y-auto flex-1 py-1.5">
+      <div className="overflow-y-auto flex-1 min-h-0 py-1.5">
         {cves.map((cve) => {
           const isSelected = cve.id === selectedId;
           const sev        = SEV[cve.severity]  ?? SEV.low;

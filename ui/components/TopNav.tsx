@@ -39,7 +39,7 @@ export default function TopNav({ agentStatus, projectId, imageRef, projectName }
           <div className="text-[13px] font-bold leading-none" style={{ color: "var(--heading)" }}>
             Control Tower
           </div>
-          <div className="text-[11px] leading-none mt-0.5" style={{ color: "var(--muted)" }}>
+          <div className="hidden md:block text-[11px] leading-none mt-0.5" style={{ color: "var(--muted)" }}>
             Security Review
           </div>
         </div>
@@ -63,7 +63,7 @@ export default function TopNav({ agentStatus, projectId, imageRef, projectName }
       )}
       {isReview && (
         <div className="flex items-center gap-2 min-w-0">
-          <Link href="/dashboard" className="flex items-center gap-1.5 text-[12px] transition-opacity hover:opacity-70 flex-shrink-0" style={{ color: "var(--muted)" }}>
+          <Link href="/dashboard" className="flex items-center gap-1.5 text-[12px] transition-opacity hover:opacity-70" style={{ color: "var(--muted)" }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
             Dashboard
           </Link>
@@ -72,12 +72,12 @@ export default function TopNav({ agentStatus, projectId, imageRef, projectName }
             {projectId || "—"}
           </span>
           {imageRef && (
-            <>
+            <span className="hidden md:flex items-center gap-2">
               <span style={{ color: "var(--dim)" }}>/</span>
               <span className="text-[11px] font-mono truncate max-w-[180px]" style={{ color: "var(--muted)" }} title={imageRef}>
                 {imageRef}
               </span>
-            </>
+            </span>
           )}
           <span className="text-[12px] flex-shrink-0" style={{ color: "var(--muted)" }}>Review</span>
         </div>
@@ -111,17 +111,18 @@ export default function TopNav({ agentStatus, projectId, imageRef, projectName }
       {(isReview || isDashboard) && (
         <Link
           href="/new-scan"
-          className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-[12px] font-semibold transition-opacity hover:opacity-80"
+          className="flex items-center gap-2 px-2.5 lg:px-4 py-1.5 rounded-lg text-[12px] font-semibold transition-opacity hover:opacity-80 flex-shrink-0"
           style={{
             background: "var(--surface2)",
             border: "1px solid var(--border)",
             color: "var(--faint)",
           }}
+          title="New scan"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
             <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
-          New scan
+          <span className="hidden lg:inline">New scan</span>
         </Link>
       )}
 
@@ -129,7 +130,7 @@ export default function TopNav({ agentStatus, projectId, imageRef, projectName }
       {!isSettings && (
         <Link
           href="/settings"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-opacity hover:opacity-80"
+          className="flex items-center gap-1.5 px-2.5 lg:px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-opacity hover:opacity-80 flex-shrink-0"
           style={{
             background: "var(--surface2)",
             border: "1px solid var(--border)",
@@ -141,7 +142,7 @@ export default function TopNav({ agentStatus, projectId, imageRef, projectName }
             <circle cx="12" cy="12" r="3"/>
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
           </svg>
-          Settings
+          <span className="hidden lg:inline">Settings</span>
         </Link>
       )}
 
@@ -158,21 +159,22 @@ export default function TopNav({ agentStatus, projectId, imageRef, projectName }
         }[agentStatus ?? "awaiting"];
         return (
           <div
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[12px] font-medium"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[12px] font-medium flex-shrink-0"
             style={{ background: cfg.bg, border: `1px solid ${cfg.bdr}`, color: cfg.color }}
+            title={cfg.label}
           >
             <span
               className={`w-2 h-2 rounded-full flex-shrink-0${cfg.pulse ? " animate-pulse" : ""}`}
               style={{ background: cfg.dot, boxShadow: `0 0 6px ${cfg.dot}` }}
             />
-            {cfg.label}
+            <span className="hidden lg:inline">{cfg.label}</span>
           </div>
         );
       })()}
 
       {/* User */}
-      <div className="flex items-center gap-2.5">
-        <div className="text-right">
+      <div className="flex items-center gap-2.5 flex-shrink-0">
+        <div className="hidden md:block text-right">
           <div className="text-[12px] font-medium" style={{ color: "var(--body)" }}>Auth Lead</div>
           <div className="text-[11px]" style={{ color: "var(--muted)" }}>Authority Reviewer</div>
         </div>

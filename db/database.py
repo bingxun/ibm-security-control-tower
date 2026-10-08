@@ -73,6 +73,8 @@ def init_db() -> None:
                 impact       TEXT,
                 description  TEXT,
                 rationale    TEXT,
+                remediation  TEXT,
+                edited       INTEGER NOT NULL DEFAULT 0,
                 rag_match    TEXT,   -- JSON blob
                 status       TEXT NOT NULL DEFAULT 'queued',
                 PRIMARY KEY (id, run_id)
@@ -99,6 +101,15 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_logs_run ON trivy_logs(run_id);
             CREATE INDEX IF NOT EXISTS idx_steps_run ON agent_steps(run_id);
         """)
+
+        # Migration: add columns introduced after this table was first created.
+        # CREATE TABLE IF NOT EXISTS above is a no-op on an existing table, so
+        # older DB files need these added explicitly.
+        existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(cves)")}
+        if "remediation" not in existing_cols:
+            conn.execute("ALTER TABLE cves ADD COLUMN remediation TEXT DEFAULT ''")
+        if "edited" not in existing_cols:
+            conn.execute("ALTER TABLE cves ADD COLUMN edited INTEGER NOT NULL DEFAULT 0")
 
 
 # ── Run CRUD ───────────────────────────────────────────────────────────────
@@ -173,8 +184,9 @@ def upsert_cves(run_id: str, cves: list[dict]) -> None:
         conn.executemany(
             """INSERT OR REPLACE INTO cves
                (id, run_id, severity, pkg, version, fixed_in, cvss, vector,
-                auth_required, impact, description, rationale, rag_match, status)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                auth_required, impact, description, rationale, remediation, edited,
+                rag_match, status)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             [
                 (
                     c.get("id", ""),
@@ -189,6 +201,8 @@ def upsert_cves(run_id: str, cves: list[dict]) -> None:
                     c.get("impact", ""),
                     c.get("description", ""),
                     c.get("rationale", ""),
+                    c.get("remediation", ""),
+                    1 if c.get("edited") else 0,
                     json.dumps(c.get("rag_match")) if c.get("rag_match") else None,
                     c.get("status", "queued"),
                 )
@@ -206,7 +220,7 @@ def update_cve_decision(
     with get_conn() as conn:
         if rationale:
             conn.execute(
-                "UPDATE cves SET status=?, rationale=? WHERE run_id=? AND id=?",
+                "UPDATE cves SET status=?, rationale=?, edited=1 WHERE run_id=? AND id=?",
                 (decision, rationale, run_id, cve_id),
             )
         else:
@@ -226,6 +240,7 @@ def get_cves(run_id: str) -> list[dict]:
         for r in rows:
             d = dict(r)
             d["rag_match"] = json.loads(d["rag_match"]) if d.get("rag_match") else None
+            d["edited"] = bool(d.get("edited", 0))
             result.append(d)
         return result
 

@@ -13,6 +13,8 @@ export interface CveRecord {
   impact: string;
   description: string;
   rationale: string;
+  remediation: string;
+  edited?: boolean;
   ragMatch?: {
     pct: number;
     project: string;

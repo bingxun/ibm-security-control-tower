@@ -97,14 +97,12 @@ def _build_prompt(cve: dict, hits: list[dict], project_id: str, cis_profile: str
             f"approved by {top['approver']}):\n{top['rationale']}"
         )
 
-    return f"""You are a cloud security architect at IBM. Write a concise, technical mitigation rationale for the following container vulnerability finding.
+    return f"""You are a cloud security architect at IBM. Assess the following container vulnerability finding and respond in EXACTLY this two-part format, with no extra commentary:
 
-The rationale MUST:
-- State whether the vulnerability is exploitable given typical cloud network controls
-- Specify a concrete remediation action (patch version, config change, or accepted risk)
-- Reference the CIS profile and project context
-- Be 2-3 sentences maximum
-- Use precise technical language suitable for a CSA Tier 1 security report
+JUSTIFICATION: <2-3 sentences stating whether the vulnerability is exploitable given typical cloud network controls, referencing the CIS profile and project context — this is a risk assessment, not a fix instruction>
+REMEDIATION: <1-2 sentences giving a concrete remediation action — a patch version to upgrade to, a config change, or an explicit accepted-risk statement if no fix exists>
+
+Use precise technical language suitable for a CSA Tier 1 security report.
 
 PROJECT: {project_id}
 CIS PROFILE: {cis_profile}
@@ -115,12 +113,42 @@ ATTACK VECTOR: {cve.get('vector','Network')}
 IMPACT: {cve.get('impact','')}
 DESCRIPTION: {cve.get('description','')}{prior}
 
-Write the mitigation rationale now (2-3 sentences only):"""
+Respond now, using exactly the JUSTIFICATION:/REMEDIATION: format above:"""
+
+
+def _parse_justification_remediation(text: str, cve: dict) -> tuple[str, str]:
+    """
+    Parse the RAD gateway's "JUSTIFICATION: ...\\nREMEDIATION: ..." response.
+    Falls back to treating the whole response as justification, with a generic
+    remediation derived from the CVE's fix version, if the model didn't follow
+    the requested format.
+    """
+    import re
+    match = re.search(
+        r"JUSTIFICATION:\s*(.*?)\s*REMEDIATION:\s*(.*)",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if match:
+        justification = match.group(1).strip()
+        remediation = match.group(2).strip()
+        if justification and remediation:
+            return justification, remediation
+
+    # Model didn't follow the format — use the raw text as justification and
+    # derive a generic remediation from the known fix version.
+    fix = cve.get("fixed_in")
+    fallback_remediation = (
+        f"Upgrade {cve['pkg']} to {fix}."
+        if fix else
+        "No fixed version is currently available — review the vendor advisory and apply compensating controls."
+    )
+    return text.strip(), fallback_remediation
 
 
 # ── Offline stub ────────────────────────────────────────────────────────────
 
-def _stub_rationale(cve: dict) -> str:
+def _stub_justification_remediation(cve: dict) -> tuple[str, str]:
     """Plain-English fallback when the RAD gateway is unreachable."""
     sev  = cve["severity"].upper()
     pkg  = cve["pkg"]
@@ -128,13 +156,14 @@ def _stub_rationale(cve: dict) -> str:
     fix  = cve.get("fixed_in") or "the latest patched release"
     vec  = cve.get("vector", "Network")
     desc = cve.get("impact", "") or cve.get("description", "")[:80]
-    return (
+    justification = (
         f"{cve['id']} is a {sev}-severity vulnerability (CVSS {cve.get('cvss',0)}) "
         f"in {pkg} {ver} with a {vec.lower()} attack vector. "
         f"{desc + '. ' if desc else ''}"
-        f"Recommended remediation: upgrade {pkg} to {fix}. "
         f"Review exploitability against this project's network controls before approving."
     )
+    remediation = f"Upgrade {pkg} to {fix}."
+    return justification, remediation
 
 
 # ── Per-CVE async worker ───────────────────────────────────────────────────
@@ -187,17 +216,19 @@ async def _synthesise_one(
         )
 
         # RAD generation — only for top-N CVEs by CVSS (use_llm=True)
-        rationale = ""
+        justification = ""
+        remediation   = ""
         source    = "stub"
         tokens    = 0
 
         if use_llm and RAD_AUTH_TOKEN:
             try:
-                prompt    = _build_prompt(updated_cve, hits, project_id, cis_profile)
+                prompt   = _build_prompt(updated_cve, hits, project_id, cis_profile)
                 # Run blocking HTTP call in thread pool so other CVEs proceed in parallel
-                rationale = await asyncio.to_thread(_rad_generate_sync, prompt)
-                source    = "rad"
-                tokens    = len(prompt.split()) + len(rationale.split())
+                raw_text = await asyncio.to_thread(_rad_generate_sync, prompt)
+                justification, remediation = _parse_justification_remediation(raw_text, updated_cve)
+                source   = "rad"
+                tokens   = len(prompt.split()) + len(raw_text.split())
             except Exception as e:
                 logger.warning("RAD gateway failed for %s (%s) — using stub", cve["id"], e)
         elif not use_llm:
@@ -205,12 +236,14 @@ async def _synthesise_one(
         else:
             logger.info("ANTHROPIC_AUTH_TOKEN not set — using stub for %s", cve["id"])
 
-        if not rationale:
-            rationale = _stub_rationale(updated_cve)
-            source    = "stub"
+        if not justification:
+            justification, remediation = _stub_justification_remediation(updated_cve)
+            source = "stub"
 
-        updated_cve["rationale"] = rationale
-        updated_cve["status"]    = "pending"
+        updated_cve["rationale"]   = justification
+        updated_cve["remediation"] = remediation
+        updated_cve["edited"]      = False
+        updated_cve["status"]      = "pending"
 
         elapsed = round(time.time() - t0, 2)
 
@@ -220,7 +253,7 @@ async def _synthesise_one(
         draft_step = AgentStep(
             id=f"draft-{cve['id']}",
             title=f"Rationale drafted — {cve['id']}",
-            desc=rationale[:120] + "…" if len(rationale) > 120 else rationale,
+            desc=justification[:120] + "…" if len(justification) > 120 else justification,
             chips=[
                 {"label": source_label, "variant": label_variant},
                 {"label": f"{elapsed}s",  "variant": "done"},

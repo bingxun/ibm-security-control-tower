@@ -64,6 +64,7 @@ def approval_node(state: AgentState) -> dict:
             cves[i]["status"] = decision
             if edited_rationale:
                 cves[i]["rationale"] = edited_rationale
+                cves[i]["edited"] = True
             break
 
     # Mark the approval step as done
