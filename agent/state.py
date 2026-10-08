@@ -24,7 +24,7 @@ class CveRecord(TypedDict):
     edited: bool           # True once a human has added manual notes
     edited_by_role: str    # role of the human who added manual_notes (e.g. "ADMIN")
     rag_match: Optional[dict]  # filled by synthesis node
-    status: str            # queued | pending | submitted | approved | rejected
+    status: str            # queued | pending | submitted | changes_requested | approved | rejected
 
 
 class AgentStep(TypedDict):
@@ -40,10 +40,14 @@ class AgentState(TypedDict):
     run_id: str
     image_ref: str
     project_id: str
+    environment_markdown: str
     cis_profile: str
     severity_threshold: str    # critical | high | medium | low — filter applied at ingest
     scanner: str               # trivy | grype — determines JSON parser in ingest node
     scan_json: dict            # raw scanner JSON (Trivy or Grype format)
+    # Agentic auto-approval ceiling: findings at or below this severity that match
+    # a published Cyber Manager baseline are auto-approved. "none" disables it.
+    auto_approve_below: str    # none | low | medium | high | critical
 
     # ── Pipeline state ─────────────────────────────────────────────────────
     cves: list[CveRecord]          # populated by ingest node

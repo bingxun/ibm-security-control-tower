@@ -6,10 +6,6 @@ import type { Project, ScanSummary } from "@/lib/api";
 import { downloadReport } from "@/lib/api";
 import { RunStatusBadge, type ScanStatus } from "./Badges";
 
-/** A scan whose every finding is approved — eligible for a sign-off report. */
-const isFullyApproved = (s: ScanSummary) =>
-  s.status === "completed" && s.rejected === 0 && s.totalCves > 0 && s.approved === s.totalCves;
-
 function ReportControl({ runId }: { runId: string }) {
   const grab = (fmt: "csv" | "pdf") => downloadReport(runId, fmt).catch(() => alert("Report download failed."));
   return (
@@ -87,8 +83,25 @@ export default function ScansTable({
       style={{ background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "var(--shadow-card)" }}
     >
       {loading && (
-        <div className="px-5 py-10 text-center text-[13px]" style={{ color: "var(--muted)" }}>
-          Loading scans…
+        <div>
+          <div className="grid grid-cols-12 px-5 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
+            <div className="col-span-1 h-3 ct-skeleton" style={{ width: "60%" }} />
+            <div className="col-span-2 h-3 ct-skeleton mr-4" />
+            <div className="col-span-3 h-3 ct-skeleton mr-4" />
+            <div className="col-span-2 h-3 ct-skeleton mr-4" />
+            <div className="col-span-2 h-3 ct-skeleton mr-4" />
+            <div className="col-span-2 h-3 ct-skeleton" />
+          </div>
+          {[0, 1, 2, 3].map((r) => (
+            <div key={r} className="grid grid-cols-12 items-center gap-4 px-5 py-4" style={{ borderBottom: r < 3 ? "1px solid var(--border)" : "none" }}>
+              <div className="col-span-1 h-3.5 ct-skeleton" />
+              <div className="col-span-2 h-6 ct-skeleton" />
+              <div className="col-span-3 h-3.5 ct-skeleton" />
+              <div className="col-span-2 h-5 ct-skeleton" />
+              <div className="col-span-2 h-3.5 ct-skeleton" />
+              <div className="col-span-2 h-3.5 ct-skeleton" />
+            </div>
+          ))}
         </div>
       )}
 
@@ -176,7 +189,7 @@ export default function ScansTable({
             </Link>
 
             <div className="col-span-1 pr-4 flex justify-end">
-              {reportable && isFullyApproved(scan) && <ReportControl runId={scan.id} />}
+              {reportable && <ReportControl runId={scan.id} />}
             </div>
           </div>
         ))}

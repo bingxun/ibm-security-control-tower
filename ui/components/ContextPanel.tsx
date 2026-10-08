@@ -7,7 +7,7 @@ interface Props {
 
 export default function ContextPanel({ stats, cves }: Props) {
   const remaining = stats.total - stats.approved - stats.rejected;
-  const pct = Math.round((stats.approved / stats.total) * 100);
+  const pct = stats.total > 0 ? Math.round((stats.approved / stats.total) * 100) : 0;
 
   // Only show unique RAG matches (deduplicate by project)
   const ragMatches = Object.values(
@@ -103,6 +103,15 @@ export default function ContextPanel({ stats, cves }: Props) {
           Memory Matches
         </p>
         <div className="px-4 pb-4 flex flex-col gap-3 overflow-y-auto flex-1 min-h-0">
+          {ragMatches.length === 0 && (
+            <div className="rounded-xl px-3.5 py-4 flex flex-col items-center text-center gap-2"
+              style={{ background: "var(--surface3)", border: "1px dashed var(--border2)" }}>
+              <span className="text-[16px]" style={{ color: "var(--accent-purple)" }}>◈</span>
+              <p className="text-[11px] leading-relaxed" style={{ color: "var(--muted)" }}>
+                No prior decisions matched these findings yet. Approved rationales are remembered and surfaced here on future scans.
+              </p>
+            </div>
+          )}
           {ragMatches.map((m) => (
             <div
               key={m.project}

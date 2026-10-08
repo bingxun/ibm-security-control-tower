@@ -24,11 +24,12 @@ def approval_node(state: AgentState) -> dict:
     steps = list(state.get("agent_steps", []))
     cves = [dict(c) for c in state["cves"]]
 
-    # Find the next CVE still awaiting a human — either `pending` (not yet
-    # submitted) or `submitted` (awaiting Cyber approval). Both must keep the
-    # gate open; otherwise, once every CVE is `submitted`, there'd be nothing to
-    # interrupt on and the router would loop here forever.
-    non_terminal = [i for i, c in enumerate(cves) if c["status"] in ("pending", "submitted")]
+    # Find the next CVE still awaiting a human — `pending` (not yet submitted),
+    # `submitted` (awaiting Cyber approval), or `changes_requested` (sent back
+    # to DevOps). All must keep the gate open; otherwise, once every CVE is
+    # non-pending, there'd be nothing to interrupt on and the router would loop
+    # here forever.
+    non_terminal = [i for i, c in enumerate(cves) if c["status"] in ("pending", "submitted", "changes_requested")]
     if not non_terminal:
         # Nothing left — route to persist
         return {"cves": cves, "agent_steps": steps}
@@ -40,6 +41,8 @@ def approval_node(state: AgentState) -> dict:
     # appear more than once in a run (e.g. musl + musl-utils share one CVE),
     # and a plain f"approval-{id}" would collide between those entries.
     step_id = f"approval-{current_idx}-{current_cve['id']}"
+
+    steps = [dict(step) for step in steps if step["id"] != step_id]
 
     # Add a waiting step to the timeline
     steps.append(
@@ -76,21 +79,22 @@ def approval_node(state: AgentState) -> dict:
     decision      = decision_payload.get("decision", "rejected")
     manual_notes  = decision_payload.get("edited_rationale")  # field name kept for API compat
 
-    target_idx = None
-    for i, cve in enumerate(cves):
-        if cve["id"] != target_cve_id:
-            continue
-        if target_pkg is not None and cve["pkg"] != target_pkg:
-            continue
-        target_idx = i
-        break
-    if target_idx is None:
-        # No pkg given and/or no exact match found — fall back to whichever
-        # CVE this interrupt actually paused on, so a decision is never lost.
-        target_idx = current_idx
+    matches = [i for i,cve in enumerate(cves) if cve["id"] == target_cve_id and (target_pkg is None or cve["pkg"] == target_pkg)]
+    if len(matches) != 1:
+        raise ValueError("Decision must identify exactly one CVE and package")
+    target_idx = matches[0]
+    current = cves[target_idx]["status"]
+    if decision not in ("submitted", "approved", "rejected", "changes_requested") or current not in ("pending", "submitted", "changes_requested"):
+        raise ValueError("Invalid decision transition")
+
+    # DevOps submits/resubmits a draft; Cyber sends a submitted finding back.
+    if decision == "submitted" and current not in ("pending", "changes_requested"):
+        raise ValueError("Only pending or changes-requested findings can be submitted")
+    if decision == "changes_requested" and current != "submitted":
+        raise ValueError("Only submitted findings can be sent back for changes")
 
     cves[target_idx]["status"] = decision
-    if manual_notes:
+    if manual_notes is not None:
         cves[target_idx]["manual_notes"] = manual_notes
         cves[target_idx]["edited"] = True
         cves[target_idx]["edited_by_role"] = decision_payload.get("edited_by_role", "")
@@ -102,10 +106,14 @@ def approval_node(state: AgentState) -> dict:
     # `current_idx` — exact match (not just an id suffix) so this can't
     # collide between two entries that happen to share the same CVE id.
     decided_step_id = f"approval-{target_idx}-{cves[target_idx]['id']}"
+    if not any(step['id'] == decided_step_id for step in steps):
+        steps.append(AgentStep(id=decided_step_id, title=f"Human review — {target_cve_id}",
+            desc=f"{cves[target_idx]['pkg']} · {decision}", chips=[], state="waiting"))
+    pending_states = ("submitted", "changes_requested")
     for step in steps:
-        if step["id"] == step_id or step["id"] == decided_step_id:
-            step["state"] = "done"
-            step["chips"] = [{"label": decision, "variant": "done"}]
+        if step["id"] == decided_step_id:
+            step["state"] = "waiting" if decision in pending_states else "done"
+            step["chips"] = [{"label": decision, "variant": "stream" if decision in pending_states else "done"}]
 
     approved = sum(1 for c in cves if c["status"] == "approved")
     rejected = sum(1 for c in cves if c["status"] == "rejected")

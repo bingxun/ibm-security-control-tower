@@ -12,6 +12,11 @@ import json
 import math
 import os
 import uuid
+import tempfile
+import threading
+from datetime import datetime, timezone
+
+_STORE_LOCK = threading.RLock()
 from typing import List, Optional
 
 from rag.embedder import embed_text, EMBED_DIM
@@ -32,8 +37,15 @@ def _load() -> list[dict]:
 
 def _save(records: list[dict]) -> None:
     os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
-    with open(DB_PATH, "w") as f:
-        json.dump(records, f)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", dir=os.path.dirname(DB_PATH) or ".", delete=False) as f:
+            temporary = f.name
+            json.dump(records, f)
+        os.replace(temporary, DB_PATH)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 # ── Cosine similarity ──────────────────────────────────────────────────────
@@ -56,6 +68,9 @@ def persist_decision(
     rationale: str,
     approver: str,
     decision: str,
+    pkg: str = "",
+    remediation: str = "",
+    run_id: str = "",
 ) -> str:
     """Embed rationale and append to the JSON store. Returns record id."""
     embed_input = f"{cve_id} {severity} {rationale}"
@@ -71,11 +86,20 @@ def persist_decision(
         "decision": decision,
         "embedding": vector,
         "project_scoped": True,
+        "pkg": pkg,
+        "remediation": remediation,
+        "run_id": run_id,
+        "published_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    records = _load()
-    records.append(record)
-    _save(records)
+    with _STORE_LOCK:
+        records = _load()
+        identity = ('cve_id', 'project_id', 'pkg', 'run_id', 'decision', 'rationale', 'remediation')
+        prior = next((r for r in records if all(r.get(k, '') == record.get(k, '') for k in identity)), None)
+        if prior:
+            return prior['id']
+        records.append(record)
+        _save(records)
     return record["id"]
 
 
@@ -90,7 +114,7 @@ def query_memory(
     Return top-k similar past decisions above the similarity threshold.
     Each result: {cve_id, project_id, rationale, approver, decision, score}
     """
-    records = [r for r in _load() if project_id is not None and r.get("project_id") == project_id and r.get("project_scoped")]
+    records = [r for r in _load() if project_id is not None and r.get("project_id") == project_id and r.get("project_scoped") and r.get("decision") == "approved"]
     if not records:
         return []
 
@@ -100,9 +124,9 @@ def query_memory(
     scored = []
     for r in records:
         emb = r.get("embedding")
-        if not emb:
+        if not emb and r.get("cve_id") != cve_id:
             continue
-        score = _cosine(query_vec, emb)
+        score = 1.0 if r.get("cve_id") == cve_id else _cosine(query_vec, emb)
         if score >= SIMILARITY_THRESHOLD:
             scored.append((score, r))
 
@@ -115,6 +139,8 @@ def query_memory(
             "rationale": r["rationale"],
             "approver": r["approver"],
             "decision": r["decision"],
+            "remediation": r.get("remediation", ""),
+            "published_at": r.get("published_at", ""),
             "score": round(score * 100),
         }
         for score, r in scored[:top_k]

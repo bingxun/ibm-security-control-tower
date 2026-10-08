@@ -63,7 +63,7 @@ def ingest_node(state: AgentState) -> dict:
     Returns a partial state update dict.
     """
     t0 = time.time()
-    trivy = state["trivy_json"]
+    trivy = state["scan_json"]
     threshold = state.get("severity_threshold", "high")
     threshold_rank = _SEV_ORDER.get(threshold, 1)   # default: high (rank 1)
 

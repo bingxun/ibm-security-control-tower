@@ -13,8 +13,9 @@ interface Props {
 // so we match by prefix rather than exact ID.
 const STAGES = [
   { prefix: "ingest",  label: "Ingest",  },
-  { prefix: "rag",     label: "Memory",  },
-  { prefix: "draft",   label: "Draft",   },
+  { prefix: "master", label: "Master" },
+  { prefix: "rag",     label: "Memory slave",  },
+  { prefix: "draft",   label: "Assessment slave",   },
   { prefix: "approval",label: "Approval",},
   { prefix: "persist", label: "Persist", },
 ];
@@ -184,7 +185,7 @@ export default function AgentDrawer({ steps, tokenFragment }: Props) {
                 style={{ background: "var(--accent-purple)", boxShadow: "0 0 6px rgba(163,113,247,0.6)" }}
               />
               <span className="text-[11px] font-semibold" style={{ color: "var(--accent-purple)" }}>
-                Live — Granite 13B
+                Latest assessment
               </span>
             </div>
             <div className="px-4 py-3" style={{ background: "var(--surface3)" }}>

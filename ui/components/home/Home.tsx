@@ -10,9 +10,14 @@ import {
 } from "@/lib/api";
 import {
   HomeShell, Hero, PrimaryLink, SecondaryLink, PlusIcon, ReviewIcon,
-  StatCard, StatGrid, SectionTitle, ActionTile, ProjectGrid, RagCallout, NoProjects,
-  awaitingReview, inProgress, pending,
+  StatCard, StatGrid, SectionTitle, ActionTile, ProjectGrid, RagCallout, NoProjects, PostureCard,
+  awaitingReview, inProgress, pending, needsMyAction, changesRequested,
 } from "./HomeKit";
+
+const ScanKpi   = <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>;
+const ClockKpi  = <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>;
+const BugKpi    = <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 2l1.5 1.5M16 2l-1.5 1.5"/><rect x="8" y="6" width="8" height="12" rx="4"/><path d="M8 10H4M20 10h-4M8 14H4M20 14h-4M12 18v3"/></svg>;
+const CheckKpi  = <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>;
 
 const EMPTY: DashboardStats = { totalScans: 0, cvesTriaged: 0, avgApprovalRate: 0, ragDecisions: 0, ragFirstPassRate: 0 };
 
@@ -21,7 +26,6 @@ const ProjIcon = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" str
 const GearIcon = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>;
 const InfoIcon = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>;
 
-const NewScanActionBtn = <a href="/new-scan" className="px-4 py-2 rounded-lg text-[12px] font-bold" style={{ background: "var(--btn-accept-bg)", color: "var(--btn-accept-text)" }}>New Scan</a>;
 
 export default function Home() {
   const { user, permissions } = useAuth();
@@ -48,13 +52,14 @@ export default function Home() {
       .catch((e) => { if (!cancelled) setError(e.message ?? "Failed to reach backend"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.canManageUsers]);
 
   const review = awaitingReview(scans);
   const openFindings = review.reduce((n, s) => n + pending(s), 0);
   const running = inProgress(scans).length;
   const scanOnly = p.canScan && !p.canApprove;
+  const actionScans = needsMyAction(scans);
+  const actionFindings = actionScans.reduce((n, s) => n + changesRequested(s), 0);
   // Approval rate should read semantically — low is not "good" (green).
   const approvalColor = stats.avgApprovalRate >= 70 ? "var(--accent-green)"
     : stats.avgApprovalRate >= 40 ? "var(--accent-yellow)" : "var(--accent-red)";
@@ -83,14 +88,17 @@ export default function Home() {
       {/* Core KPIs — always shown */}
       <StatGrid>
         {p.canApprove
-          ? <StatCard value={String(review.length)} label="Awaiting review" sub={`${openFindings} open findings`} color="var(--accent-red)" />
-          : <StatCard value={String(stats.totalScans)} label="Total scans" sub="your projects" color="var(--accent-blue)" />}
+          ? <StatCard value={String(review.length)} label="Awaiting review" sub={`${openFindings} open findings`} color="var(--accent-red)" icon={ReviewIcon} />
+          : <StatCard value={String(stats.totalScans)} label="Total scans" sub="your projects" color="var(--accent-blue)" icon={ScanKpi} />}
         {scanOnly
-          ? <StatCard value={String(running)} label="In progress" sub="currently scanning" color="var(--accent-yellow)" />
-          : <StatCard value={String(stats.totalScans)} label="Total scans" sub="all projects" color="var(--accent-blue)" />}
-        <StatCard value={String(stats.cvesTriaged)} label="CVEs triaged" sub="across scans" color="var(--accent-purple)" />
-        <StatCard value={`${stats.avgApprovalRate}%`} label="Avg. approval rate" sub="first-pass" color={approvalColor} />
+          ? <StatCard value={String(running)} label="In progress" sub="currently scanning" color="var(--accent-yellow)" icon={ClockKpi} />
+          : <StatCard value={String(stats.totalScans)} label="Total scans" sub="all projects" color="var(--accent-blue)" icon={ScanKpi} />}
+        <StatCard value={String(stats.cvesTriaged)} label="CVEs triaged" sub="across scans" color="var(--accent-purple)" icon={BugKpi} />
+        <StatCard value={`${stats.avgApprovalRate}%`} label="Avg. approval rate" sub="first-pass" color={approvalColor} icon={CheckKpi} />
       </StatGrid>
+
+      {/* Security posture — severity distribution + review progress */}
+      {scans.length > 0 && <PostureCard scans={scans} />}
 
       {/* Governance strip — only for user managers (super admins) */}
       {p.canManageUsers && (
@@ -134,23 +142,27 @@ export default function Home() {
         {!loading && !error && projects.length === 0 ? <NoProjects canManage={p.canManageProjects} /> : <ProjectGrid projects={projects} />}
       </section>
 
-      {/* Recent scans — always */}
-      <section className="space-y-4">
-        <SectionTitle title="Recent scans" action={<span className="text-[12px]" style={{ color: "var(--muted)" }}>{loading ? "Loading…" : `${scans.length} scans`}</span>} />
-        <ScansTable
-          scans={scans} projects={projects} loading={loading} error={error}
-          emptyTitle="No scans yet"
-          emptyBody={p.canScan ? "Run your first scan to see results here." : "Scans will appear here once they run."}
-          emptyActions={p.canScan ? NewScanActionBtn : undefined}
-        />
-      </section>
+      {/* DevOps: findings sent back for revision — actionable */}
+      {scanOnly && actionScans.length > 0 && (
+        <section className="space-y-4">
+          <SectionTitle
+            title="Needs my action"
+            count={actionFindings}
+            action={<Link href="/review" className="text-xs font-semibold" style={{ color: "var(--accent-yellow)" }}>Revise &amp; resubmit →</Link>}
+          />
+          <ScansTable
+            scans={actionScans} projects={projects} loading={loading} error={error}
+            emptyTitle="Nothing to revise" emptyBody="No findings have been sent back to you."
+          />
+        </section>
+      )}
 
-      {/* DevOps context note — scan-only users */}
-      {scanOnly && (
+      {/* DevOps context note — scan-only users with nothing to revise */}
+      {scanOnly && actionScans.length === 0 && (
         <div className="rounded-2xl px-6 py-4 flex items-center gap-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
           <span className="grid place-items-center w-9 h-9 rounded-xl flex-shrink-0" style={{ background: "var(--accent-blue-bg)", color: "var(--accent-blue)", border: "1px solid var(--border)" }}>{InfoIcon}</span>
           <p className="text-[12px]" style={{ color: "var(--subtle)" }}>
-            You launch scans and the agent synthesises rationale for every finding. A <span style={{ color: "var(--heading)" }}>reviewer</span> then approves or rejects — you&apos;ll see the outcome in each scan&apos;s approval progress.
+            You prepare and submit findings for approval. A <span style={{ color: "var(--heading)" }}>Cyber Manager</span> then approves or sends them back with requested changes — anything returned to you appears here as <span style={{ color: "var(--heading)" }}>Needs my action</span>.
           </p>
         </div>
       )}
