@@ -325,7 +325,7 @@ function NewScanPageInner() {
             subtitle="The image to scan for vulnerabilities"
           >
             <div className="flex flex-col gap-4">
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <Label>Registry</Label>
                   <Select
@@ -355,7 +355,7 @@ function NewScanPageInner() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <Label>Tag / Digest</Label>
                   <Input
@@ -398,7 +398,7 @@ function NewScanPageInner() {
             subtitle="Helps the agent ground its rationale in your actual environment"
           >
             <div className="flex flex-col gap-4">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <Label htmlFor="scan-project">Project <span style={{ color: "var(--accent-red)" }}>*</span></Label>
                   <Select
@@ -461,7 +461,7 @@ function NewScanPageInner() {
             title="Scan Options"
             subtitle="Control what the scanner looks for and how the agent handles results"
           >
-            <div className="grid grid-cols-3 gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
               {/* Scanner */}
               <div>
                 <Label>Scanner</Label>

@@ -24,6 +24,30 @@ export function clearToken(): void {
   document.cookie = "sct_authed=; path=/; max-age=0; SameSite=Strict";
 }
 
+/**
+ * Download a run's report (CSV or PDF). The endpoint is auth-gated, so we fetch
+ * it with the Bearer token and trigger a browser download from the blob rather
+ * than opening the URL directly (which would send no Authorization header).
+ */
+export async function downloadReport(runId: string, format: "csv" | "pdf"): Promise<void> {
+  const res = await fetch(`${BASE}/run/${encodeURIComponent(runId)}/report?format=${format}`, {
+    headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : undefined,
+  });
+  if (!res.ok) throw new Error(`Report download failed (${res.status})`);
+  const blob = await res.blob();
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = /filename="?([^"]+)"?/.exec(disposition);
+  const filename = match?.[1] ?? `report_${runId.slice(0, 8)}.${format}`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export interface ScanPayload {
@@ -61,7 +85,7 @@ export interface ScanSummary {
   medium: number;
   approved: number;
   rejected: number;
-  status: "completed" | "running" | "error";
+  status: "queued" | "scanning" | "running" | "awaiting_approval" | "completed" | "error";
   duration: string;
 }
 
@@ -77,6 +101,8 @@ export interface DecisionPayload {
   cve_id: string;
   decision: "approved" | "rejected";
   edited_rationale?: string;
+  pkg?: string;
+  edited_by_role?: string;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────

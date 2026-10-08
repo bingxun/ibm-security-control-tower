@@ -12,6 +12,7 @@ const descriptions: Record<UserRole, string> = {
   ADMIN: "Scan and review within assigned projects.",
   DEVOPS_ENGINEER: "Start scans and view findings.",
   CYBER_MANAGER: "Review findings and access settings.",
+  DSO_MANAGER: "Submit decisions on findings and access settings (cannot reject).",
 };
 const control = styles.field;
 const button = styles.button;

@@ -5,7 +5,7 @@ import { CveRecord } from "@/lib/types";
 import { AgentStep } from "@/lib/types";
 import AgentDrawer from "./AgentDrawer";
 import { usePermission, useAuth } from "@/lib/auth";
-import { ROLE_LABELS } from "@/lib/types";
+import { ROLE_LABELS, UserRole } from "@/lib/types";
 
 interface Props {
   cve: CveRecord;
@@ -14,7 +14,7 @@ interface Props {
   totalCves: number;
   reviewedCount: number;
   approvedCount: number;
-  onDecision: (id: string, decision: "approved" | "rejected", editedRationale?: string) => void;
+  onDecision: (id: string, decision: "approved" | "rejected", editedRationale?: string, pkg?: string, editedByRole?: string) => void;
 }
 
 const SEV_COLOR: Record<string, string> = {
@@ -31,6 +31,26 @@ const SEV_BG: Record<string, string> = {
   low:      "var(--accent-green-bg)",
 };
 
+// Marker embedded in old-format `rationale` strings, before the backend
+// started sending `remediation` as its own field. Case-insensitive.
+const LEGACY_REMEDIATION_MARKER = /recommended remediation:/i;
+
+/**
+ * Splits an old-format `rationale` string (one that still has the fix
+ * instruction embedded inline) into its Justification and Remediation
+ * parts. Used only when `cve.remediation` is empty — new-format records
+ * already come pre-split from the backend.
+ */
+function splitLegacyRationale(rationale: string): { justification: string; remediation: string | null } {
+  const match = LEGACY_REMEDIATION_MARKER.exec(rationale);
+  if (!match) {
+    return { justification: rationale, remediation: null };
+  }
+  const justification = rationale.slice(0, match.index).trim();
+  const remediation = rationale.slice(match.index + match[0].length).trim();
+  return { justification, remediation: remediation.length > 0 ? remediation : null };
+}
+
 // ── Edit Modal ─────────────────────────────────────────────────────────────
 function EditModal({
   cve,
@@ -39,9 +59,9 @@ function EditModal({
 }: {
   cve: CveRecord;
   onCancel: () => void;
-  onAccept: (rationale: string) => void;
+  onAccept: (notes: string) => void;
 }) {
-  const [draft, setDraft] = useState(cve.rationale);
+  const [draft, setDraft] = useState(cve.manualNotes ?? "");
 
   return (
     /* Backdrop */
@@ -61,7 +81,7 @@ function EditModal({
         >
           <div>
             <p className="text-[14px] font-bold" style={{ color: "var(--heading)" }}>
-              Edit Rationale
+              Add Manual Notes
             </p>
             <p className="text-[11px] mt-0.5" style={{ color: "var(--muted)" }}>
               {cve.id} · {cve.pkg} {cve.version}
@@ -84,7 +104,7 @@ function EditModal({
             className="block text-[11px] font-semibold uppercase tracking-wider mb-2"
             style={{ color: "var(--muted)" }}
           >
-            Mitigation Rationale
+            Your Remarks
           </label>
           <textarea
             value={draft}
@@ -98,10 +118,10 @@ function EditModal({
             }}
             onFocus={(e) => (e.target.style.borderColor = "var(--accent-blue)")}
             onBlur={(e) => (e.target.style.borderColor = "var(--border)")}
-            placeholder="Enter mitigation rationale…"
+            placeholder="Add your remarks or comments here…"
           />
           <p className="text-[11px] mt-2" style={{ color: "var(--muted)" }}>
-            {draft.length} characters · Edit to align with your specific environment controls before accepting.
+            {draft.length} characters · These notes are stored separately from the AI-generated justification and remediation.
           </p>
         </div>
 
@@ -124,7 +144,7 @@ function EditModal({
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <polyline points="20 6 9 17 4 12" />
             </svg>
-            Accept with edits
+            Save notes & accept
           </button>
           <button
             onClick={onCancel}
@@ -155,6 +175,7 @@ export default function CveReview({
 }: Props) {
   const [editOpen, setEditOpen] = useState(false);
   const canApprove  = usePermission("canApprove");
+  const canReject   = usePermission("canReject");
   const { user }    = useAuth();
 
   const sevColor = SEV_COLOR[cve.severity] ?? "var(--faint)";
@@ -169,22 +190,39 @@ export default function CveReview({
     ? cve.rationale.replace(/^\[Auto-generated stub[^\]]*\]\s*/, "")
     : cve.rationale;
 
+  // New-format records come pre-split from the backend (`remediation` is a
+  // clean, separate field). Old-format records still have the remediation
+  // instruction embedded inside `rationale` — fall back to splitting it out.
+  const hasCleanRemediation = !!cve.remediation && cve.remediation.trim().length > 0;
+  const legacySplit = !hasCleanRemediation && displayRationale ? splitLegacyRationale(displayRationale) : null;
+  const justificationText = hasCleanRemediation
+    ? displayRationale
+    : legacySplit
+    ? legacySplit.justification
+    : displayRationale;
+  const remediationText = hasCleanRemediation
+    ? cve.remediation
+    : legacySplit
+    ? legacySplit.remediation
+    : null;
+  const manualNotesText = cve.manualNotes && cve.manualNotes.trim().length > 0 ? cve.manualNotes : null;
+
   return (
     <>
       {editOpen && (
         <EditModal
           cve={cve}
           onCancel={() => setEditOpen(false)}
-          onAccept={(rationale) => {
+          onAccept={(notes) => {
             setEditOpen(false);
-            onDecision(cve.id, "approved", rationale);
+            onDecision(cve.id, "approved", notes, cve.pkg, user?.roles?.[0]);
           }}
         />
       )}
 
       <main
-        className="flex-1 overflow-y-auto flex flex-col gap-6 px-8 py-7"
-        style={{ background: "var(--bg)" }}
+        className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-6 px-8 py-7"
+        style={{ background: "var(--bg)", overscrollBehavior: "contain" }}
       >
 
         {/* ── 1. CVE Identity bar ── */}
@@ -228,7 +266,7 @@ export default function CveReview({
               <span style={{ color: "var(--dim)" }}>→</span>{" "}
               <span style={{ color: "var(--accent-green)" }}>fix: {cve.fixedIn}</span>
             </p>
-            <p className="text-[13px] mt-1" style={{ color: "var(--muted)" }}>
+            <p className="text-[13px] mt-1 break-words" style={{ color: "var(--muted)" }}>
               {cve.description}
             </p>
           </div>
@@ -329,12 +367,73 @@ export default function CveReview({
           {/* Rationale body */}
           <div className="px-6 py-5">
             {displayRationale ? (
-              <p
-                className="text-[14px] leading-[1.8] font-normal"
-                style={{ color: "var(--body)" }}
-              >
-                {displayRationale}
-              </p>
+              <div className="flex flex-col gap-4">
+                {/* Justification — always shown */}
+                <div className="pl-4" style={{ borderLeft: "2px solid var(--accent-purple)" }}>
+                  <div
+                    className="text-[11px] font-semibold uppercase tracking-wider mb-1.5"
+                    style={{ color: "var(--accent-purple)" }}
+                  >
+                    Justification
+                  </div>
+                  <p
+                    className="text-[14px] leading-[1.8] font-normal break-words whitespace-pre-wrap"
+                    style={{ color: "var(--body)" }}
+                  >
+                    {justificationText}
+                  </p>
+                </div>
+
+                {/* Recommended Remediation — shown whenever there's remediation content */}
+                {remediationText && (
+                  <>
+                    <div style={{ borderTop: "1px solid var(--border)" }} />
+                    <div className="pl-4" style={{ borderLeft: "2px solid var(--accent-green)" }}>
+                      <div
+                        className="text-[11px] font-semibold uppercase tracking-wider mb-1.5"
+                        style={{ color: "var(--accent-green)" }}
+                      >
+                        Recommended Remediation
+                      </div>
+                      <p
+                        className="text-[14px] leading-[1.8] font-normal break-words whitespace-pre-wrap"
+                        style={{ color: "var(--body)" }}
+                      >
+                        {remediationText}
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                {/* Manual Input — read-only display of human-added remarks */}
+                {manualNotesText && (
+                  <>
+                    <div style={{ borderTop: "1px solid var(--border)" }} />
+                    <div className="pl-4" style={{ borderLeft: "2px solid var(--accent-blue)" }}>
+                      <div
+                        className="text-[11px] font-semibold uppercase tracking-wider mb-1.5 flex items-center gap-2"
+                        style={{ color: "var(--accent-blue)" }}
+                      >
+                        Manual Input
+                        {cve.editedByRole && (
+                          <span
+                            className="text-[11px] font-normal normal-case tracking-normal"
+                            style={{ color: "var(--muted)" }}
+                          >
+                            — added by {ROLE_LABELS[cve.editedByRole as UserRole] ?? cve.editedByRole}
+                          </span>
+                        )}
+                      </div>
+                      <p
+                        className="text-[14px] leading-[1.8] font-normal break-words whitespace-pre-wrap"
+                        style={{ color: "var(--body)" }}
+                      >
+                        {manualNotesText}
+                      </p>
+                    </div>
+                  </>
+                )}
+              </div>
             ) : (
               <div className="flex items-center gap-3 py-4">
                 <span
@@ -363,7 +462,7 @@ export default function CveReview({
               >
                 ◈
               </div>
-              <p className="text-[12px] leading-relaxed" style={{ color: "var(--subtle)" }}>
+              <p className="text-[12px] leading-relaxed break-words" style={{ color: "var(--subtle)" }}>
                 <span style={{ color: "var(--accent-purple)" }}>Grounded from memory</span>
                 {" — "}{cve.ragMatch.summary} Approved by{" "}
                 <span style={{ color: "var(--body)" }}>{cve.ragMatch.approver}</span>
@@ -378,11 +477,11 @@ export default function CveReview({
             className="flex items-center gap-3 px-6 py-5"
             style={{ borderTop: "1px solid var(--border)", background: "var(--surface3)" }}
           >
-            {canApprove ? (
+            {canReject ? (
               <>
                 {/* Primary — Accept */}
                 <button
-                  onClick={() => onDecision(cve.id, "approved")}
+                  onClick={() => onDecision(cve.id, "approved", undefined, cve.pkg)}
                   className="flex items-center gap-2 px-8 py-3 rounded-xl text-[14px] font-bold transition-all duration-150 hover:opacity-90 active:scale-[0.98]"
                   style={{
                     background: "var(--btn-accept-bg)",
@@ -410,12 +509,12 @@ export default function CveReview({
                     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                   </svg>
-                  Edit
+                  Add Notes
                 </button>
 
                 {/* Danger — Reject */}
                 <button
-                  onClick={() => onDecision(cve.id, "rejected")}
+                  onClick={() => onDecision(cve.id, "rejected", undefined, cve.pkg)}
                   className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all duration-150 hover:opacity-80"
                   style={{
                     background: "var(--accent-red-bg)",
@@ -429,8 +528,45 @@ export default function CveReview({
                   Reject
                 </button>
               </>
+            ) : canApprove ? (
+              <>
+                {/* Primary — Submit (submit-only workflow: no reject) */}
+                <button
+                  onClick={() => onDecision(cve.id, "approved", undefined, cve.pkg)}
+                  className="flex items-center gap-2 px-8 py-3 rounded-xl text-[14px] font-bold transition-all duration-150 hover:opacity-90 active:scale-[0.98]"
+                  style={{
+                    background: "var(--btn-accept-bg)",
+                    color: "var(--btn-accept-text)",
+                    boxShadow: "0 0 20px var(--btn-accept-glow)",
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                  Submit
+                </button>
+
+                {/* Secondary — Edit */}
+                <button
+                  onClick={() => setEditOpen(true)}
+                  className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all duration-150 hover:opacity-80"
+                  style={{
+                    background: "var(--surface2)",
+                    color: "var(--faint)",
+                    border: "1px solid var(--border2)",
+                  }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                  </svg>
+                  Add Notes
+                </button>
+              </>
             ) : (
-              /* Read-only notice for non-approvers */
+              /* Read-only notice for non-approvers — unreachable by any of
+                 today's 4 roles (ADMIN/DEVOPS_ENGINEER/DSO_MANAGER/CYBER_MANAGER
+                 all have canApprove: true), kept for any future role that needs it */
               <div
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px]"
                 style={{ background: "var(--accent-yellow-bg, rgba(210,153,34,0.08))", border: "1px solid rgba(210,153,34,0.2)", color: "var(--accent-yellow)" }}

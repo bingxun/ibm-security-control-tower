@@ -97,9 +97,13 @@ def init_db() -> None:
                 impact       TEXT,
                 description  TEXT,
                 rationale    TEXT,
+                remediation  TEXT,
+                manual_notes TEXT,
+                edited       INTEGER NOT NULL DEFAULT 0,
+                edited_by_role TEXT DEFAULT '',
                 rag_match    TEXT,   -- JSON blob
                 status       TEXT NOT NULL DEFAULT 'queued',
-                PRIMARY KEY (id, run_id)
+                PRIMARY KEY (id, run_id, pkg)
             );
 
             CREATE TABLE IF NOT EXISTS trivy_logs (
@@ -171,6 +175,62 @@ def init_db() -> None:
                                MIN(started_at) FROM runs GROUP BY project_id""")
         if "project_scoped" not in {row[1] for row in conn.execute("PRAGMA table_info(runs)")}:
             conn.execute("ALTER TABLE runs ADD COLUMN project_scoped INTEGER NOT NULL DEFAULT 0")
+
+        # Migration: add cves columns introduced after the table was first created.
+        existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(cves)")}
+        if "remediation" not in existing_cols:
+            conn.execute("ALTER TABLE cves ADD COLUMN remediation TEXT DEFAULT ''")
+        if "edited" not in existing_cols:
+            conn.execute("ALTER TABLE cves ADD COLUMN edited INTEGER NOT NULL DEFAULT 0")
+        if "manual_notes" not in existing_cols:
+            conn.execute("ALTER TABLE cves ADD COLUMN manual_notes TEXT DEFAULT ''")
+        if "edited_by_role" not in existing_cols:
+            conn.execute("ALTER TABLE cves ADD COLUMN edited_by_role TEXT DEFAULT ''")
+
+        # Migration: widen the cves primary key to (id, run_id, pkg). The original
+        # PK (id, run_id) silently dropped rows via INSERT OR REPLACE whenever one
+        # CVE id affected multiple packages in a run (e.g. musl + musl-utils).
+        # SQLite can't ALTER a PRIMARY KEY in place, so rebuild the table.
+        pk_cols = {row["name"] for row in conn.execute("PRAGMA table_info(cves)") if row["pk"] > 0}
+        if pk_cols == {"id", "run_id"}:
+            conn.executescript("""
+                CREATE TABLE cves_new (
+                    id            TEXT NOT NULL,
+                    run_id        TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+                    severity      TEXT NOT NULL,
+                    pkg           TEXT NOT NULL,
+                    version       TEXT,
+                    fixed_in      TEXT,
+                    cvss          REAL DEFAULT 0,
+                    vector        TEXT,
+                    auth_required TEXT,
+                    impact        TEXT,
+                    description   TEXT,
+                    rationale     TEXT,
+                    remediation   TEXT,
+                    manual_notes  TEXT,
+                    edited        INTEGER NOT NULL DEFAULT 0,
+                    edited_by_role TEXT DEFAULT '',
+                    rag_match     TEXT,
+                    status        TEXT NOT NULL DEFAULT 'queued',
+                    PRIMARY KEY (id, run_id, pkg)
+                );
+
+                INSERT INTO cves_new
+                    (id, run_id, severity, pkg, version, fixed_in, cvss, vector,
+                     auth_required, impact, description, rationale, remediation,
+                     manual_notes, edited, edited_by_role, rag_match, status)
+                SELECT
+                    id, run_id, severity, pkg, version, fixed_in, cvss, vector,
+                    auth_required, impact, description, rationale, remediation,
+                    manual_notes, edited, edited_by_role, rag_match, status
+                FROM cves;
+
+                DROP TABLE cves;
+                ALTER TABLE cves_new RENAME TO cves;
+
+                CREATE INDEX IF NOT EXISTS idx_cves_run ON cves(run_id);
+            """)
 
 
 # ── Run CRUD ───────────────────────────────────────────────────────────────
@@ -246,8 +306,9 @@ def upsert_cves(run_id: str, cves: list[dict]) -> None:
         conn.executemany(
             """INSERT OR REPLACE INTO cves
                (id, run_id, severity, pkg, version, fixed_in, cvss, vector,
-                auth_required, impact, description, rationale, rag_match, status)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                auth_required, impact, description, rationale, remediation,
+                manual_notes, edited, edited_by_role, rag_match, status)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             [
                 (
                     c.get("id", ""),
@@ -262,6 +323,10 @@ def upsert_cves(run_id: str, cves: list[dict]) -> None:
                     c.get("impact", ""),
                     c.get("description", ""),
                     c.get("rationale", ""),
+                    c.get("remediation", ""),
+                    c.get("manual_notes", ""),
+                    1 if c.get("edited") else 0,
+                    c.get("edited_by_role", ""),
                     json.dumps(c.get("rag_match")) if c.get("rag_match") else None,
                     c.get("status", "queued"),
                 )
@@ -274,18 +339,28 @@ def update_cve_decision(
     run_id: str,
     cve_id: str,
     decision: str,
-    rationale: str | None = None,
+    manual_notes: str | None = None,
+    pkg: str | None = None,
+    edited_by_role: str | None = None,
 ) -> None:
+    """
+    `pkg` disambiguates CVEs that share an id across multiple packages in the
+    same run (e.g. musl + musl-utils). When omitted, falls back to matching by
+    id alone — correct for the common case, but will update every package
+    sharing that id if more than one happens to be present.
+    """
+    pkg_clause = " AND pkg=?" if pkg is not None else ""
+    pkg_args = (pkg,) if pkg is not None else ()
     with get_conn() as conn:
-        if rationale:
+        if manual_notes:
             conn.execute(
-                "UPDATE cves SET status=?, rationale=? WHERE run_id=? AND id=?",
-                (decision, rationale, run_id, cve_id),
+                f"UPDATE cves SET status=?, manual_notes=?, edited=1, edited_by_role=? WHERE run_id=? AND id=?{pkg_clause}",
+                (decision, manual_notes, edited_by_role, run_id, cve_id, *pkg_args),
             )
         else:
             conn.execute(
-                "UPDATE cves SET status=? WHERE run_id=? AND id=?",
-                (decision, run_id, cve_id),
+                f"UPDATE cves SET status=? WHERE run_id=? AND id=?{pkg_clause}",
+                (decision, run_id, cve_id, *pkg_args),
             )
 
 
@@ -299,6 +374,7 @@ def get_cves(run_id: str) -> list[dict]:
         for r in rows:
             d = dict(r)
             d["rag_match"] = json.loads(d["rag_match"]) if d.get("rag_match") else None
+            d["edited"] = bool(d.get("edited", 0))
             result.append(d)
         return result
 
@@ -427,9 +503,9 @@ def get_scan_summaries(limit: int = 50, project_ids: list[str] | None = None) ->
 
 # ── User CRUD ──────────────────────────────────────────────────────────────
 
-VALID_ROLES = {"SUPER_ADMIN", "ADMIN", "DEVOPS_ENGINEER", "CYBER_MANAGER"}
+VALID_ROLES = {"SUPER_ADMIN", "ADMIN", "DEVOPS_ENGINEER", "CYBER_MANAGER", "DSO_MANAGER"}
 # Highest privilege first — used only to pick a display "primary" role.
-ROLE_PRIORITY = ["SUPER_ADMIN", "ADMIN", "CYBER_MANAGER", "DEVOPS_ENGINEER"]
+ROLE_PRIORITY = ["SUPER_ADMIN", "ADMIN", "CYBER_MANAGER", "DSO_MANAGER", "DEVOPS_ENGINEER"]
 SESSION_TTL_HOURS = 24
 
 

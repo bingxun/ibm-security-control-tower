@@ -23,7 +23,7 @@ export default function ContextPanel({ stats, cves }: Props) {
 
   return (
     <aside
-      className="w-64 flex-shrink-0 flex flex-col overflow-hidden"
+      className="hidden lg:flex lg:w-64 flex-shrink-0 flex-col overflow-hidden"
       style={{ background: "var(--surface)", borderLeft: "1px solid var(--border)" }}
     >
       {/* ── Session overview ── */}
@@ -95,14 +95,14 @@ export default function ContextPanel({ stats, cves }: Props) {
       </div>
 
       {/* ── RAG Memory ── */}
-      <div className="flex flex-col flex-1 overflow-hidden">
+      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
         <p
           className="px-5 pt-4 pb-2 text-[11px] font-semibold uppercase tracking-wider flex-shrink-0"
           style={{ color: "var(--muted)" }}
         >
           Memory Matches
         </p>
-        <div className="px-4 pb-4 flex flex-col gap-3 overflow-y-auto flex-1">
+        <div className="px-4 pb-4 flex flex-col gap-3 overflow-y-auto flex-1 min-h-0">
           {ragMatches.map((m) => (
             <div
               key={m.project}

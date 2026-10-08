@@ -14,7 +14,9 @@ export const MOCK_CVES: CveRecord[] = [
     description:
       "Malicious code was found in xz-utils 5.6.0 and 5.6.1 which, under certain conditions, could allow an attacker to break sshd authentication and gain unauthorized access to the system remotely.",
     rationale:
-      "Exposure is contained within CLOUD-247 by network egress restrictions preventing external SSH access, and the affected image has been rebuilt against xz-utils 5.4.6. Patch to 5.6.1 is not recommended due to ongoing upstream investigation — pinning to 5.4.6 is the accepted remediation.",
+      "Exposure is contained within CLOUD-247 by network egress restrictions preventing external SSH access, and the affected image has been rebuilt against xz-utils 5.4.6.",
+    remediation:
+      "Pin xz-utils to 5.4.6 — do not upgrade to 5.6.1 while the upstream backdoor investigation is ongoing.",
     ragMatch: {
       pct: 89,
       project: "CLOUD-233",
@@ -37,7 +39,8 @@ export const MOCK_CVES: CveRecord[] = [
     description:
       "A vulnerability in GnuTLS allows a server-side timing side-channel attack during RSA-PSK key exchange, allowing a remote attacker to retrieve plaintext.",
     rationale:
-      "IBM CIS TLS inspection proxy sits upstream and terminates all TLS before traffic reaches the affected container, preventing exploitation. GnuTLS patched to 3.8.3 is scheduled for Sprint 38.",
+      "IBM CIS TLS inspection proxy sits upstream and terminates all TLS before traffic reaches the affected container, preventing exploitation.",
+    remediation: "Upgrade gnutls to 3.8.3 — scheduled for Sprint 38.",
     ragMatch: {
       pct: 87,
       project: "CLOUD-199",
@@ -60,7 +63,8 @@ export const MOCK_CVES: CveRecord[] = [
     description:
       "HTTP/2 Rapid Reset Attack. An attacker can send a stream of RST_STREAM frames causing unbounded CPU consumption on the server, leading to denial of service.",
     rationale:
-      "This vulnerability is mitigated within CLOUD-247 by two existing controls: WAF rate-limiting rules cap inbound HTTP/2 connections to 1,000 req/s per source IP, and the IBM CIS DDoS proxy terminates HTTP/2 streams before they reach nghttp2, eliminating the RST flood amplification path. A patch to nghttp2 1.57.0 is scheduled for Sprint 38 (ticket PROJ-4821). Residual risk is assessed as LOW.",
+      "This vulnerability is mitigated within CLOUD-247 by two existing controls: WAF rate-limiting rules cap inbound HTTP/2 connections to 1,000 req/s per source IP, and the IBM CIS DDoS proxy terminates HTTP/2 streams before they reach nghttp2, eliminating the RST flood amplification path. Residual risk is assessed as LOW.",
+    remediation: "Upgrade nghttp2 to 1.57.0 — scheduled for Sprint 38 (ticket PROJ-4821).",
     ragMatch: {
       pct: 92,
       project: "CLOUD-199",
@@ -83,6 +87,7 @@ export const MOCK_CVES: CveRecord[] = [
     description:
       "A buffer overflow in the iconv() function in glibc can be exploited to achieve code execution on systems that use PHP's iconv filter.",
     rationale: "",
+    remediation: "",
     status: "queued",
   },
   {
@@ -98,6 +103,7 @@ export const MOCK_CVES: CveRecord[] = [
     description:
       "libexpat before 2.6.0 allows a denial of service (resource consumption) because many full reparsings are needed in the case of a large token for which multiple buffer fills are needed.",
     rationale: "",
+    remediation: "",
     status: "queued",
   },
   {
@@ -113,6 +119,7 @@ export const MOCK_CVES: CveRecord[] = [
     description:
       "A buffer overflow in the GNU C Library's dynamic loader ld.so when processing the GLIBC_TUNABLES environment variable could allow a local attacker to gain root privileges.",
     rationale: "",
+    remediation: "",
     status: "queued",
   },
   {
@@ -128,6 +135,7 @@ export const MOCK_CVES: CveRecord[] = [
     description:
       "A use-after-free vulnerability in the Linux kernel's netfilter nf_tables component can be exploited by a local attacker to achieve privilege escalation to root.",
     rationale: "",
+    remediation: "",
     status: "rejected",
   },
   {
@@ -143,6 +151,7 @@ export const MOCK_CVES: CveRecord[] = [
     description:
       "nghttp2 library is vulnerable to denial of service due to insufficient limitation of the number of CONTINUATION frames in an HTTP/2 HEADERS frame.",
     rationale: "",
+    remediation: "",
     status: "queued",
   },
 ];

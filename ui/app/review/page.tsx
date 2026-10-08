@@ -8,8 +8,9 @@ import CveQueue from "@/components/CveQueue";
 import CveReview from "@/components/CveReview";
 import ContextPanel from "@/components/ContextPanel";
 
-import { CveRecord, AgentStep, RunStats } from "@/lib/types";
+import { CveRecord, AgentStep, RunStats, cveKey } from "@/lib/types";
 import { streamRun, submitDecision, getRun, type ScanRun } from "@/lib/api";
+import Link from "next/link";
 
 // ── Synthesis progress screen ──────────────────────────────────────────────
 function SynthesisLoader({
@@ -227,8 +228,8 @@ function ReviewContent({ runId }: { runId: string | null }) {
         setCves(event.cves);
         setSelectedId((prev) => {
           if (prev) return prev;
-          return event.cves!.find((c) => c.status === "pending" || c.status === "queued")?.id
-            ?? event.cves![0]?.id ?? "";
+          const first = event.cves!.find((c) => c.status === "pending" || c.status === "queued") ?? event.cves![0];
+          return first ? cveKey(first) : "";
         });
       }
       if (event.agent_steps) setAgentSteps(event.agent_steps);
@@ -290,12 +291,17 @@ function ReviewContent({ runId }: { runId: string | null }) {
   const handleDecision = useCallback(async (
     id: string,
     decision: "approved" | "rejected",
-    editedRationale?: string
+    editedRationale?: string,
+    pkg?: string,
+    editedByRole?: string,
   ) => {
     if (!runId) return;
     try {
-      await submitDecision(runId, { cve_id: id, decision, edited_rationale: editedRationale });
-      setCves(prev => prev.map(c => c.id === id ? { ...c, status: decision, rationale: editedRationale ?? c.rationale } : c));
+      await submitDecision(runId, { cve_id: id, decision, edited_rationale: editedRationale, pkg, edited_by_role: editedByRole });
+      // Match on id AND pkg — the same CVE id can span multiple packages.
+      setCves(prev => prev.map(c => (c.id === id && (pkg === undefined || c.pkg === pkg))
+        ? { ...c, status: decision, manualNotes: editedRationale ?? c.manualNotes, edited: editedRationale ? true : c.edited, editedByRole: editedRationale ? editedByRole : c.editedByRole }
+        : c));
       showToast("Decision saved", "success");
     } catch {
       showToast("Decision was not saved. Check your project access and try again.", "error");
@@ -303,7 +309,7 @@ function ReviewContent({ runId }: { runId: string | null }) {
   }, [runId, showToast]);
 
   // ── Derived ───────────────────────────────────────────────────────────────
-  const selectedCve = cves.find((c) => c.id === selectedId) ?? cves[0];
+  const selectedCve = cves.find((c) => cveKey(c) === selectedId) ?? cves[0];
   const reviewedCount = useMemo(
     () => cves.filter((c) => c.status === "approved" || c.status === "rejected").length,
     [cves]

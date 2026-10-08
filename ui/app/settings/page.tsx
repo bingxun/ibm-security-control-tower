@@ -59,7 +59,7 @@ function FieldRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-8">
+    <div className="flex flex-wrap items-start justify-between gap-4 sm:gap-8">
       <div className="flex-shrink-0 w-48 pt-0.5">
         <p className="text-[12px] font-semibold" style={{ color: "var(--faint)" }}>{label}</p>
         {hint && <p className="text-[11px] mt-0.5 leading-snug" style={{ color: "var(--muted)" }}>{hint}</p>}
@@ -367,7 +367,7 @@ function WatsonxSection() {
         />
       </FieldRow>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <FieldRow label="Max tokens" hint="Per-CVE generation cap">
           <TextInput value={cfg.maxTokens} onChange={set("maxTokens")} />
         </FieldRow>
@@ -486,7 +486,7 @@ function RagSection() {
 
       {/* Stats strip */}
       <div
-        className="grid grid-cols-3 gap-3 p-4 rounded-xl"
+        className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-xl"
         style={{ background: "var(--accent-purple-bg)", border: "1px solid var(--accent-purple-bdr)" }}
       >
         {[

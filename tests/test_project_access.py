@@ -173,6 +173,20 @@ class ProjectAccessTests(unittest.TestCase):
         with db.get_conn() as conn:
             db._write_roles(conn, admin['id'], roles)
 
+    def test_same_cve_id_across_packages_is_not_dropped(self):
+        # One CVE id affecting two packages must keep both rows, and a decision
+        # with pkg must land only on the matching package.
+        db.create_run('dup-run', 'dup-image', self.a)
+        db.upsert_cves('dup-run', [
+            {'id': 'CVE-dup', 'severity': 'high', 'pkg': 'musl', 'status': 'pending'},
+            {'id': 'CVE-dup', 'severity': 'high', 'pkg': 'musl-utils', 'status': 'pending'},
+        ])
+        rows = db.get_cves('dup-run')
+        self.assertEqual(sorted(r['pkg'] for r in rows if r['id'] == 'CVE-dup'), ['musl', 'musl-utils'])
+        db.update_cve_decision('dup-run', 'CVE-dup', 'approved', pkg='musl')
+        by_pkg = {r['pkg']: r['status'] for r in db.get_cves('dup-run') if r['id'] == 'CVE-dup'}
+        self.assertEqual(by_pkg, {'musl': 'approved', 'musl-utils': 'pending'})
+
     def test_migration_is_idempotent_and_does_not_assign_users(self):
         # Demote the bootstrap super admin, then let the one-time migration re-promote it.
         with db.get_conn() as conn:

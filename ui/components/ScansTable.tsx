@@ -3,6 +3,32 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type { Project, ScanSummary } from "@/lib/api";
+import { downloadReport } from "@/lib/api";
+import { RunStatusBadge, type ScanStatus } from "./Badges";
+
+/** A scan whose every finding is approved — eligible for a sign-off report. */
+const isFullyApproved = (s: ScanSummary) =>
+  s.status === "completed" && s.rejected === 0 && s.totalCves > 0 && s.approved === s.totalCves;
+
+function ReportControl({ runId }: { runId: string }) {
+  const grab = (fmt: "csv" | "pdf") => downloadReport(runId, fmt).catch(() => alert("Report download failed."));
+  return (
+    <span className="inline-flex items-center gap-1">
+      {(["csv", "pdf"] as const).map((fmt) => (
+        <button
+          key={fmt}
+          type="button"
+          onClick={() => grab(fmt)}
+          className="text-[10px] font-bold uppercase px-1.5 py-1 rounded-md"
+          style={{ background: "var(--surface2)", color: "var(--accent-blue)", border: "1px solid var(--border)" }}
+          title={`Download ${fmt.toUpperCase()} report`}
+        >
+          {fmt}
+        </button>
+      ))}
+    </span>
+  );
+}
 
 function SevBadge({ label, count, color }: { label: string; count: number; color: string }) {
   if (count === 0) return null;
@@ -44,6 +70,7 @@ export default function ScansTable({
   emptyTitle,
   emptyBody,
   emptyActions,
+  reportable = false,
 }: {
   scans: ScanSummary[];
   projects: Project[];
@@ -52,6 +79,7 @@ export default function ScansTable({
   emptyTitle: string;
   emptyBody: string;
   emptyActions?: ReactNode;
+  reportable?: boolean;
 }) {
   return (
     <div
@@ -88,62 +116,69 @@ export default function ScansTable({
         >
           <div className="col-span-1">ID</div>
           <div className="col-span-2">Project</div>
-          <div className="col-span-4">Image</div>
+          <div className="col-span-3">Image</div>
           <div className="col-span-2">Findings</div>
-          <div className="col-span-2">Approval</div>
+          <div className="col-span-2">Status</div>
           <div className="col-span-1 text-right">Date</div>
+          <div className="col-span-1 text-right">{reportable ? "Report" : ""}</div>
         </div>
 
         {scans.map((scan, i) => (
-          <Link
+          <div
             key={scan.id}
-            href={`/review?run=${scan.id}`}
-            className="grid grid-cols-12 px-5 py-4 items-center transition-colors"
+            className="grid grid-cols-12 items-center transition-colors"
             style={{ borderBottom: i < scans.length - 1 ? "1px solid var(--border)" : "none" }}
             onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface2)")}
             onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
           >
-            <div className="col-span-1 min-w-0 pr-3">
-              <span title={scan.id} className="block truncate text-[12px] font-mono font-semibold" style={{ color: "var(--accent-blue)" }}>
-                #{scan.seq}
-              </span>
-            </div>
-
-            <div className="col-span-2 min-w-0 pr-3">
-              <span
-                title={projects.find(p => p.id === scan.project)?.name ?? scan.project}
-                className="block truncate text-[12px] font-semibold px-2 py-1 rounded-md"
-                style={{ background: "var(--surface2)", color: "var(--faint)", border: "1px solid var(--border)" }}
-              >
-                {projects.find(p => p.id === scan.project)?.name ?? scan.project}
-              </span>
-            </div>
-
-            <div className="col-span-4 min-w-0">
-              <p className="text-[12px] font-mono truncate" style={{ color: "var(--body)" }}>{scan.image}</p>
-              <p className="text-[11px] mt-0.5" style={{ color: "var(--muted)" }}>{scan.duration}</p>
-            </div>
-
-            <div className="col-span-2">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <SevBadge label="C" count={scan.critical} color="var(--accent-red)" />
-                <SevBadge label="H" count={scan.high} color="var(--accent-orange)" />
-                <SevBadge label="M" count={scan.medium} color="var(--accent-yellow)" />
+            <Link href={`/review?run=${scan.id}`} className="col-span-11 grid grid-cols-11 px-5 py-4 items-center">
+              <div className="col-span-1 min-w-0 pr-3">
+                <span title={scan.id} className="block truncate text-[12px] font-mono font-semibold" style={{ color: "var(--accent-blue)" }}>
+                  #{scan.seq}
+                </span>
               </div>
-              <p className="text-[11px] mt-1" style={{ color: "var(--muted)" }}>{scan.totalCves} total</p>
-            </div>
 
-            <div className="col-span-2">
-              <StatusChip approved={scan.approved} total={scan.totalCves} />
-              {scan.rejected > 0 && (
-                <p className="text-[11px] mt-0.5" style={{ color: "var(--accent-red)" }}>{scan.rejected} rejected</p>
-              )}
-            </div>
+              <div className="col-span-2 min-w-0 pr-3">
+                <span
+                  title={projects.find(p => p.id === scan.project)?.name ?? scan.project}
+                  className="block truncate text-[12px] font-semibold px-2 py-1 rounded-md"
+                  style={{ background: "var(--surface2)", color: "var(--faint)", border: "1px solid var(--border)" }}
+                >
+                  {projects.find(p => p.id === scan.project)?.name ?? scan.project}
+                </span>
+              </div>
 
-            <div className="col-span-1 text-right">
-              <span className="text-[11px]" style={{ color: "var(--muted)" }}>{scan.date}</span>
+              <div className="col-span-3 min-w-0">
+                <p className="text-[12px] font-mono truncate" style={{ color: "var(--body)" }}>{scan.image}</p>
+                <p className="text-[11px] mt-0.5" style={{ color: "var(--muted)" }}>{scan.duration}</p>
+              </div>
+
+              <div className="col-span-2">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <SevBadge label="C" count={scan.critical} color="var(--accent-red)" />
+                  <SevBadge label="H" count={scan.high} color="var(--accent-orange)" />
+                  <SevBadge label="M" count={scan.medium} color="var(--accent-yellow)" />
+                </div>
+                <p className="text-[11px] mt-1" style={{ color: "var(--muted)" }}>{scan.totalCves} total</p>
+              </div>
+
+              <div className="col-span-2">
+                <RunStatusBadge status={scan.status as ScanStatus} />
+                <div className="mt-1.5"><StatusChip approved={scan.approved} total={scan.totalCves} /></div>
+                {scan.rejected > 0 && (
+                  <p className="text-[11px] mt-0.5" style={{ color: "var(--accent-red)" }}>{scan.rejected} rejected</p>
+                )}
+              </div>
+
+              <div className="col-span-1 text-right">
+                <span className="text-[11px]" style={{ color: "var(--muted)" }}>{scan.date}</span>
+              </div>
+            </Link>
+
+            <div className="col-span-1 pr-4 flex justify-end">
+              {reportable && isFullyApproved(scan) && <ReportControl runId={scan.id} />}
             </div>
-          </Link>
+          </div>
         ))}
       </>)}
     </div>

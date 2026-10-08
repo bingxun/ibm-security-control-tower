@@ -25,7 +25,7 @@ const NewScanActionBtn = <a href="/new-scan" className="px-4 py-2 rounded-lg tex
 
 export default function Home() {
   const { user, permissions } = useAuth();
-  const p = permissions ?? { canScan: false, canApprove: false, canViewSettings: false, canManageProjects: false, canManageUsers: false };
+  const p = permissions ?? { canScan: false, canApprove: false, canReject: false, canViewSettings: false, canManageProjects: false, canManageUsers: false };
 
   const [stats, setStats] = useState<DashboardStats>(EMPTY);
   const [scans, setScans] = useState<ScanSummary[]>([]);

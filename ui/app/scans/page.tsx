@@ -48,6 +48,11 @@ function ProjectScansInner() {
 
   const project = projects.find(p => p.id === projectId);
 
+  // Drill-down shows the latest scan per image (scans arrive newest-first).
+  const latestPerImage = Array.from(
+    scans.reduce((map, s) => (map.has(s.image) ? map : map.set(s.image, s)), new Map<string, ScanSummary>()).values()
+  );
+
   return (
     <div className="flex flex-col h-screen overflow-hidden" style={{ background: "var(--bg)", color: "var(--heading)" }}>
       <TopNav />
@@ -75,18 +80,19 @@ function ProjectScansInner() {
           </div>
 
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-[15px] font-bold" style={{ color: "var(--heading)" }}>Scans</h2>
+            <h2 className="text-[15px] font-bold" style={{ color: "var(--heading)" }}>Images</h2>
             <div className="flex items-center gap-3">
-              <span className="text-[12px]" style={{ color: "var(--muted)" }}>{loading ? "Loading…" : `${scans.length} scans`}</span>
+              <span className="text-[12px]" style={{ color: "var(--muted)" }}>{loading ? "Loading…" : `${latestPerImage.length} ${latestPerImage.length === 1 ? "image" : "images"}`}</span>
               <button type="button" className={management.button} onClick={() => setRetry(n => n + 1)} disabled={loading}>Refresh</button>
             </div>
           </div>
 
           <ScansTable
-            scans={scans}
+            scans={latestPerImage}
             projects={projects}
             loading={loading}
             error={error}
+            reportable
             emptyTitle={project ? `No scans in ${project.name}` : "No scans yet"}
             emptyBody="Run a scan to see results here."
             emptyActions={permissions?.canScan ? <NewScanButton /> : undefined}
