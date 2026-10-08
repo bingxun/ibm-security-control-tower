@@ -3,20 +3,12 @@
 import { useState } from "react";
 import TopNav from "@/components/TopNav";
 import RequireAuth from "@/components/RequireAuth";
+import UsersSettings from "@/components/UsersSettings";
+import { usePermission } from "@/lib/auth";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
 type Section = "watsonx" | "rag" | "users" | "scanner" | "notifications" | "danger";
-
-interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: "admin" | "reviewer" | "viewer";
-  initials: string;
-  lastActive: string;
-  active: boolean;
-}
 
 // ── Shared micro-components ────────────────────────────────────────────────
 
@@ -512,160 +504,6 @@ function RagSection() {
   );
 }
 
-function UsersSection() {
-  const [users, setUsers] = useState<User[]>([
-    { id: "u1", name: "Auth Lead",      email: "auth.lead@ibm.com",      role: "admin",    initials: "AL", lastActive: "just now",  active: true  },
-    { id: "u2", name: "Sarah Patel",    email: "s.patel@ibm.com",        role: "reviewer", initials: "SP", lastActive: "2h ago",    active: true  },
-    { id: "u3", name: "Marcus Lim",     email: "m.lim@ibm.com",          role: "reviewer", initials: "ML", lastActive: "yesterday", active: true  },
-    { id: "u4", name: "Jane Tan",       email: "j.tan@ibm.com",          role: "reviewer", initials: "JT", lastActive: "3 days ago",active: false },
-    { id: "u5", name: "Observer Bot",   email: "observer@internal",      role: "viewer",   initials: "OB", lastActive: "1 day ago", active: true  },
-  ]);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState("reviewer");
-  const [inviteSent, setInviteSent] = useState(false);
-
-  const roleColor = (r: User["role"]) =>
-    r === "admin" ? "var(--accent-red)" : r === "reviewer" ? "var(--accent-blue)" : "var(--muted)";
-  const roleBg = (r: User["role"]) =>
-    r === "admin" ? "var(--accent-red-bg)" : r === "reviewer" ? "var(--accent-blue-bg)" : "var(--surface2)";
-
-  const updateRole = (id: string, role: User["role"]) =>
-    setUsers((p) => p.map((u) => (u.id === id ? { ...u, role } : u)));
-  const toggleActive = (id: string) =>
-    setUsers((p) => p.map((u) => (u.id === id ? { ...u, active: !u.active } : u)));
-
-  const handleInvite = () => {
-    if (!inviteEmail.trim()) return;
-    setInviteSent(true);
-    setTimeout(() => { setInviteEmail(""); setInviteRole("reviewer"); setInviteSent(false); }, 2000);
-  };
-
-  return (
-    <SectionCard
-      title="Users & Roles"
-      subtitle="Manage who can review CVEs and administer the system"
-      icon={
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-blue)" strokeWidth="2">
-          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
-        </svg>
-      }
-    >
-      {/* Invite row */}
-      <div
-        className="flex items-center gap-3 p-4 rounded-xl"
-        style={{ background: "var(--surface2)", border: "1px solid var(--border)" }}
-      >
-        <input
-          type="email"
-          placeholder="name@ibm.com"
-          value={inviteEmail}
-          onChange={(e) => setInviteEmail(e.target.value)}
-          className="flex-1 px-3 py-2 rounded-lg text-[13px] outline-none"
-          style={{ background: "var(--surface3)", border: "1px solid var(--border)", color: "var(--body)" }}
-          onFocus={(e) => (e.target.style.borderColor = "var(--accent-blue)")}
-          onBlur={(e) => (e.target.style.borderColor = "var(--border)")}
-        />
-        <select
-          value={inviteRole}
-          onChange={(e) => setInviteRole(e.target.value)}
-          className="px-3 py-2 rounded-lg text-[13px] outline-none appearance-none"
-          style={{ background: "var(--surface3)", border: "1px solid var(--border)", color: "var(--body)", minWidth: "110px" }}
-        >
-          <option value="admin">Admin</option>
-          <option value="reviewer">Reviewer</option>
-          <option value="viewer">Viewer</option>
-        </select>
-        <button
-          onClick={handleInvite}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[12px] font-semibold transition-opacity hover:opacity-80 flex-shrink-0"
-          style={{
-            background: inviteSent ? "var(--accent-green-bg)" : "var(--btn-accept-bg)",
-            color: inviteSent ? "var(--accent-green)" : "var(--btn-accept-text)",
-            border: inviteSent ? "1px solid var(--accent-green-bdr)" : "none",
-          }}
-        >
-          {inviteSent ? "✓ Sent" : (
-            <>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-              Invite
-            </>
-          )}
-        </button>
-      </div>
-
-      {/* Role legend */}
-      <div className="flex items-center gap-3">
-        {(["admin", "reviewer", "viewer"] as const).map((r) => (
-          <div key={r} className="flex items-center gap-1.5">
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase" style={{ background: roleBg(r), color: roleColor(r) }}>{r}</span>
-            <span className="text-[11px]" style={{ color: "var(--muted)" }}>
-              {r === "admin" ? "Full control" : r === "reviewer" ? "Accept / Reject" : "Read only"}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      {/* User table */}
-      <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--border)" }}>
-        {/* Header */}
-        <div
-          className="grid grid-cols-12 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider"
-          style={{ background: "var(--surface2)", color: "var(--muted)", borderBottom: "1px solid var(--border)" }}
-        >
-          <div className="col-span-4">User</div>
-          <div className="col-span-3">Email</div>
-          <div className="col-span-2">Role</div>
-          <div className="col-span-2">Last active</div>
-          <div className="col-span-1 text-right">Status</div>
-        </div>
-        {users.map((u, i) => (
-          <div
-            key={u.id}
-            className="grid grid-cols-12 px-4 py-3 items-center"
-            style={{ borderBottom: i < users.length - 1 ? "1px solid var(--border)" : "none", opacity: u.active ? 1 : 0.5 }}
-          >
-            {/* Avatar + name */}
-            <div className="col-span-4 flex items-center gap-2.5">
-              <div
-                className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0"
-                style={{ background: "linear-gradient(135deg, #4493f8, #7c5cd8)" }}
-              >
-                {u.initials}
-              </div>
-              <span className="text-[12px] font-medium" style={{ color: "var(--body)" }}>{u.name}</span>
-            </div>
-            {/* Email */}
-            <div className="col-span-3">
-              <span className="text-[11px] font-mono" style={{ color: "var(--muted)" }}>{u.email}</span>
-            </div>
-            {/* Role selector */}
-            <div className="col-span-2">
-              <select
-                value={u.role}
-                onChange={(e) => updateRole(u.id, e.target.value as User["role"])}
-                className="text-[11px] font-bold px-2 py-0.5 rounded uppercase outline-none appearance-none cursor-pointer"
-                style={{ background: roleBg(u.role), color: roleColor(u.role), border: "none" }}
-              >
-                <option value="admin">admin</option>
-                <option value="reviewer">reviewer</option>
-                <option value="viewer">viewer</option>
-              </select>
-            </div>
-            {/* Last active */}
-            <div className="col-span-2">
-              <span className="text-[11px]" style={{ color: "var(--muted)" }}>{u.lastActive}</span>
-            </div>
-            {/* Toggle active */}
-            <div className="col-span-1 flex justify-end">
-              <Toggle enabled={u.active} onChange={() => toggleActive(u.id)} />
-            </div>
-          </div>
-        ))}
-      </div>
-    </SectionCard>
-  );
-}
-
 function ScannerSection() {
   const [cfg, setCfg] = useState({
     defaultScanner: "trivy",
@@ -819,17 +657,17 @@ function NotificationsSection() {
   );
 }
 
-function DangerSection() {
-  const [confirm, setConfirm] = useState<"rag" | "scans" | null>(null);
-  const [done, setDone] = useState<"rag" | "scans" | null>(null);
-
-  const execute = (which: "rag" | "scans") => {
-    setConfirm(null);
-    setDone(which);
-    setTimeout(() => setDone(null), 3000);
-  };
-
-  const DangerRow = ({ id, title, desc, btnLabel }: { id: "rag" | "scans"; title: string; desc: string; btnLabel: string }) => (
+function DangerRow({ id, title, desc, btnLabel, confirm, done, setConfirm, execute }: {
+  id: "rag" | "scans";
+  title: string;
+  desc: string;
+  btnLabel: string;
+  confirm: "rag" | "scans" | null;
+  done: "rag" | "scans" | null;
+  setConfirm: (value: "rag" | "scans" | null) => void;
+  execute: (value: "rag" | "scans") => void;
+}) {
+  return (
     <div
       className="flex items-center justify-between gap-6 px-5 py-4 rounded-xl"
       style={{ background: "var(--surface2)", border: "1px solid var(--border)" }}
@@ -872,6 +710,19 @@ function DangerSection() {
       )}
     </div>
   );
+}
+
+function DangerSection() {
+  const [confirm, setConfirm] = useState<"rag" | "scans" | null>(null);
+  const [done, setDone] = useState<"rag" | "scans" | null>(null);
+
+  const execute = (which: "rag" | "scans") => {
+    setConfirm(null);
+    setDone(which);
+    setTimeout(() => setDone(null), 3000);
+  };
+
+
 
   return (
     <SectionCard
@@ -894,12 +745,20 @@ function DangerSection() {
       </div>
 
       <DangerRow
+        confirm={confirm}
+        done={done}
+        setConfirm={setConfirm}
+        execute={execute}
         id="rag"
         title="Purge RAG memory"
         desc="Delete all 312 persisted decisions from the Milvus vector store. Future scans will lose all institutional knowledge."
         btnLabel="Purge memory"
       />
       <DangerRow
+        confirm={confirm}
+        done={done}
+        setConfirm={setConfirm}
+        execute={execute}
         id="scans"
         title="Delete all scan history"
         desc="Remove all scan run records and associated CVE triage data from the system. Dashboard will reset to zero."
@@ -914,7 +773,7 @@ function DangerSection() {
 const SECTION_COMPONENTS: Record<Section, React.ComponentType> = {
   watsonx: WatsonxSection,
   rag: RagSection,
-  users: UsersSection,
+  users: UsersSettings,
   scanner: ScannerSection,
   notifications: NotificationsSection,
   danger: DangerSection,
@@ -922,6 +781,7 @@ const SECTION_COMPONENTS: Record<Section, React.ComponentType> = {
 
 function SettingsPageInner() {
   const [active, setActive] = useState<Section>("watsonx");
+  const canManageUsers = usePermission("canManageUsers");
   const ActiveSection = SECTION_COMPONENTS[active];
 
   return (
@@ -940,7 +800,7 @@ function SettingsPageInner() {
           >
             Settings
           </p>
-          {NAV_ITEMS.map((item) => {
+          {NAV_ITEMS.filter((item) => item.id !== "users" || canManageUsers).map((item) => {
             const isActive = active === item.id;
             const isDanger = item.id === "danger";
             return (

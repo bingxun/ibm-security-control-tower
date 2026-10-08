@@ -1,0 +1,17 @@
+.page { height: 100dvh; overflow-y: auto; background: var(--bg); }
+.loading { height: 100dvh; display: grid; place-items: center; color: var(--body); background: var(--bg); }
+.form input { min-height: 50px; border-color: var(--faint) !important; }
+.form input::placeholder { color: var(--faint); opacity: 1; }
+.page button:focus-visible, .form input:focus-visible, .form [role="alert"]:focus { outline: 2px solid var(--accent-blue); outline-offset: 3px; }
+.reveal { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 44px; height: 44px; border-radius: 8px; cursor: pointer; }
+.reveal:hover { background: var(--surface2); }
+.submit:hover:not(:disabled) { filter: brightness(1.1); }
+.submit:active:not(:disabled) { transform: translateY(1px); }
+.form [role="alert"] { overflow-wrap: anywhere; }
+.form [role="alert"] svg { flex-shrink: 0; }
+.motionToggle { color: var(--faint); font-size: 12px; min-height: 36px; padding: 6px 12px; border: 1px solid var(--border2); border-radius: 8px; cursor: pointer; }
+.motionToggle:hover { background: var(--surface2); color: var(--heading); }
+.page[data-paused="true"] * { animation-play-state: paused !important; }
+@media (prefers-reduced-motion: reduce) {
+  .page *, .page *::before, .page *::after { animation: none !important; transition: none !important; }
+}
