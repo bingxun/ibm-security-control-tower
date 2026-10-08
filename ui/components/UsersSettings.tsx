@@ -10,6 +10,7 @@ const descriptions: Record<UserRole, string> = {
   ADMIN: "Scan, review findings, and manage users.",
   DEVOPS_ENGINEER: "Start scans and view findings.",
   CYBER_MANAGER: "Review findings and access settings.",
+  DSO_MANAGER: "Start scans and view findings.",
 };
 const control = "w-full min-h-11 rounded-lg border border-[var(--border2)] bg-[var(--surface2)] px-3 py-2 text-sm text-[var(--body)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)] disabled:opacity-60";
 const button = "min-h-11 rounded-lg border border-[var(--border2)] px-3 py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-blue)] disabled:opacity-60 disabled:cursor-not-allowed";

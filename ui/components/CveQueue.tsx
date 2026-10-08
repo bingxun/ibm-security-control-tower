@@ -1,6 +1,6 @@
 "use client";
 
-import { CveRecord } from "@/lib/types";
+import { CveRecord, cveKey } from "@/lib/types";
 
 const SEV: Record<string, { color: string; bg: string; label: string }> = {
   critical: { color: "var(--accent-red)",    bg: "var(--accent-red-bg)",         label: "C" },
@@ -18,8 +18,9 @@ const STATUS: Record<string, { icon: string; color: string }> = {
 
 interface Props {
   cves: CveRecord[];
+  /** A `cveKey(cve)` composite key, not a bare `cve.id` — see lib/types.ts. */
   selectedId: string;
-  onSelect: (id: string) => void;
+  onSelect: (key: string) => void;
 }
 
 export default function CveQueue({ cves, selectedId, onSelect }: Props) {
@@ -90,14 +91,15 @@ export default function CveQueue({ cves, selectedId, onSelect }: Props) {
       {/* ── CVE List ── */}
       <div className="overflow-y-auto flex-1 min-h-0 py-1.5">
         {cves.map((cve) => {
-          const isSelected = cve.id === selectedId;
+          const key        = cveKey(cve);
+          const isSelected = key === selectedId;
           const sev        = SEV[cve.severity]  ?? SEV.low;
           const sta        = STATUS[cve.status] ?? STATUS.queued;
 
           return (
             <button
-              key={cve.id}
-              onClick={() => onSelect(cve.id)}
+              key={key}
+              onClick={() => onSelect(key)}
               className="w-full text-left relative flex items-center gap-0 transition-colors duration-100"
               style={{
                 background: isSelected ? "var(--surface2)" : "transparent",

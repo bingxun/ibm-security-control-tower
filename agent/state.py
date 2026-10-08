@@ -20,7 +20,9 @@ class CveRecord(TypedDict):
     description: str
     rationale: str         # justification text — filled by synthesis node
     remediation: str       # concrete fix action — filled by synthesis node
-    edited: bool           # True once a human has manually edited the justification
+    manual_notes: str      # human-added remarks, kept separate from the AI text
+    edited: bool           # True once a human has added manual notes
+    edited_by_role: str    # role of the human who added manual_notes (e.g. "ADMIN")
     rag_match: Optional[dict]  # filled by synthesis node
     status: str            # queued | pending | approved | rejected
 

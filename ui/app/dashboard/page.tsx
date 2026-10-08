@@ -31,6 +31,7 @@ function DashboardPageInner() {
   const [dashStats, setDashStats] = useState<DashboardStats>(EMPTY_STATS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [projectFilter, setProjectFilter] = useState<string>("");
 
   useEffect(() => {
     Promise.all([listScans(), getDashboardStats()])
@@ -73,6 +74,11 @@ function DashboardPageInner() {
       imageCount: p.images.size,
     }));
   }, [scans]);
+
+  const filteredProjects = useMemo(
+    () => (projectFilter ? projects.filter((p) => p.project === projectFilter) : projects),
+    [projects, projectFilter]
+  );
 
   const statsRow = [
     { label: "Total scans",        value: String(dashStats.totalScans),               sub: "all time",          color: "var(--accent-blue)"   },
@@ -190,9 +196,33 @@ function DashboardPageInner() {
               <h2 className="text-[15px] font-bold" style={{ color: "var(--heading)" }}>
                 Projects
               </h2>
-              <span className="text-[12px]" style={{ color: "var(--muted)" }}>
-                {loading ? "Loading…" : `${projects.length} projects`}
-              </span>
+              <div className="flex items-center gap-3">
+                <select
+                  value={projectFilter}
+                  onChange={(e) => setProjectFilter(e.target.value)}
+                  className="px-3 py-2 rounded-lg text-[13px] outline-none appearance-none"
+                  style={{
+                    background: "var(--surface2)",
+                    border: "1px solid var(--border)",
+                    color: "var(--body)",
+                    backgroundImage:
+                      "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236e7681' stroke-width='2.5' stroke-linecap='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E\")",
+                    backgroundRepeat: "no-repeat",
+                    backgroundPosition: "right 12px center",
+                    paddingRight: "32px",
+                  }}
+                >
+                  <option value="">All Projects</option>
+                  {projects.map((p) => (
+                    <option key={p.project} value={p.project}>{p.project}</option>
+                  ))}
+                </select>
+                <span className="text-[12px]" style={{ color: "var(--muted)" }}>
+                  {loading
+                    ? "Loading…"
+                    : `${filteredProjects.length} project${filteredProjects.length === 1 ? "" : "s"}`}
+                </span>
+              </div>
             </div>
 
             <div
@@ -235,8 +265,15 @@ function DashboardPageInner() {
                 </div>
               )}
 
+              {/* Filtered-empty state (no project matches the selected filter) */}
+              {!loading && !error && projects.length > 0 && filteredProjects.length === 0 && (
+                <div className="px-5 py-10 text-center text-[13px]" style={{ color: "var(--muted)" }}>
+                  No project matches the selected filter.
+                </div>
+              )}
+
               {/* Table header + rows */}
-              {!loading && !error && projects.length > 0 && (
+              {!loading && !error && projects.length > 0 && filteredProjects.length > 0 && (
               <div className="overflow-x-auto">
               <div className="min-w-[720px]">
               <div
@@ -250,13 +287,13 @@ function DashboardPageInner() {
                 <div className="col-span-1 text-right">Date</div>
               </div>
 
-              {projects.map((p, i) => (
+              {filteredProjects.map((p, i) => (
                 <Link
                   key={p.project}
                   href={`/project?name=${encodeURIComponent(p.project)}`}
                   className="grid grid-cols-12 px-5 py-4 items-center transition-colors"
                   style={{
-                    borderBottom: i < projects.length - 1 ? "1px solid var(--border)" : "none",
+                    borderBottom: i < filteredProjects.length - 1 ? "1px solid var(--border)" : "none",
                   }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface2)")}
                   onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}

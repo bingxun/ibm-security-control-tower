@@ -240,10 +240,11 @@ async def _synthesise_one(
             justification, remediation = _stub_justification_remediation(updated_cve)
             source = "stub"
 
-        updated_cve["rationale"]   = justification
-        updated_cve["remediation"] = remediation
-        updated_cve["edited"]      = False
-        updated_cve["status"]      = "pending"
+        updated_cve["rationale"]     = justification
+        updated_cve["remediation"]   = remediation
+        updated_cve["manual_notes"]  = ""
+        updated_cve["edited"]        = False
+        updated_cve["status"]        = "pending"
 
         elapsed = round(time.time() - t0, 2)
 

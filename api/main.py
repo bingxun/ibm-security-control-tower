@@ -11,9 +11,12 @@ Routes:
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -34,9 +37,10 @@ if sys.platform == "win32":
 logger = logging.getLogger("control_tower")
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fpdf import FPDF
 from langgraph.types import Command
 from pydantic import BaseModel, EmailStr
 from sse_starlette.sse import EventSourceResponse
@@ -154,6 +158,8 @@ class DecisionRequest(BaseModel):
     cve_id: str
     decision: str          # "approved" | "rejected"
     edited_rationale: Optional[str] = None
+    pkg: Optional[str] = None  # disambiguates a cve_id shared by multiple packages
+    edited_by_role: Optional[str] = None  # role of the user who added manual notes
 
 
 # ── Run state helpers ──────────────────────────────────────────────────────
@@ -185,6 +191,8 @@ def _run_snapshot(run_id: str) -> dict:
                 "description":  c.get("description", ""),
                 "rationale":    c.get("rationale", ""),
                 "remediation":  c.get("remediation", ""),
+                "manualNotes":  c.get("manual_notes", ""),
+                "editedByRole": c.get("edited_by_role", ""),
                 "edited":       bool(c.get("edited", False)),
                 "ragMatch":     c.get("rag_match"),
                 "status":       c.get("status", "queued"),
@@ -237,6 +245,8 @@ def _run_snapshot(run_id: str) -> dict:
             "description":  c.get("description", ""),
             "rationale":    c.get("rationale", ""),
             "remediation":  c.get("remediation", ""),
+            "manualNotes":  c.get("manual_notes", ""),
+            "editedByRole": c.get("edited_by_role", ""),
             "edited":       bool(c.get("edited", False)),
             "ragMatch":     c.get("rag_match"),
             "status":       c.get("status", "queued"),
@@ -444,21 +454,34 @@ def _resume_agent(run_id: str, decision: dict) -> None:
             stream_mode="values",
         ):
             run["langgraph_state"] = event
+            if event.get("cves"):
+                upsert_cves(run_id, event["cves"])
             _push_event(run_id, "running")
 
         state = GRAPH.get_state(config)
-        if state.next:
+        final_vals = state.values if state else {}
+        update_run_stats(
+            run_id,
+            tokens_used=final_vals.get("tokens_used", 0),
+            avg_synthesis_s=final_vals.get("avg_synthesis_s", 0.0),
+            rag_hits=final_vals.get("rag_hits", 0),
+        )
+
+        if state and state.next:
             # Still more CVEs pending — back at approval gate
             run["status"] = "awaiting_approval"
             run["langgraph_state"] = state.values
+            update_run_status(run_id, "awaiting_approval")
             _push_event(run_id, "awaiting_approval")
         else:
             run["status"] = "completed"
+            update_run_status(run_id, "completed")
             _push_event(run_id, "completed")
 
     except Exception as e:
         run["status"] = "error"
         run["error"] = str(e)
+        update_run_status(run_id, "error", error=str(e))
         _push_event(run_id, "error")
         raise
 
@@ -590,13 +613,17 @@ def submit_decision(run_id: str, req: DecisionRequest, background_tasks: Backgro
         run_id=run_id,
         cve_id=req.cve_id,
         decision=req.decision,
-        rationale=req.edited_rationale,
+        manual_notes=req.edited_rationale,
+        pkg=req.pkg,
+        edited_by_role=req.edited_by_role,
     )
 
     decision_payload = {
         "cve_id": req.cve_id,
         "decision": req.decision,
         "edited_rationale": req.edited_rationale,
+        "pkg": req.pkg,
+        "edited_by_role": req.edited_by_role,
     }
 
     background_tasks.add_task(_resume_agent, run_id, decision_payload)
@@ -607,6 +634,133 @@ def submit_decision(run_id: str, req: DecisionRequest, background_tasks: Backgro
 def list_scans():
     """Return past scan summaries for the dashboard table — sourced from SQLite."""
     return get_scan_summaries()
+
+
+# ── Reports ────────────────────────────────────────────────────────────────
+
+_REPORT_COLUMNS = [
+    "CVE ID", "Severity", "Package", "Version", "Fixed In", "CVSS",
+    "Status", "Justification", "Remediation", "Manual Notes",
+]
+
+
+def _report_filename(image_ref: str, run_id: str, ext: str) -> str:
+    safe_image = re.sub(r"[^A-Za-z0-9_.-]+", "_", image_ref or "image").strip("_") or "image"
+    return f"report_{safe_image}_{run_id[:8]}.{ext}"
+
+
+def _cve_report_row(c: dict) -> list:
+    return [
+        c.get("id", ""),
+        c.get("severity", ""),
+        c.get("pkg", ""),
+        c.get("version", ""),
+        c.get("fixed_in", ""),
+        c.get("cvss", ""),
+        c.get("status", ""),
+        c.get("rationale", "") or "",
+        c.get("remediation", "") or "",
+        c.get("manual_notes", "") or "",
+    ]
+
+
+def _pdf_safe(text) -> str:
+    """fpdf2's core Helvetica font only supports latin-1 — replace anything else
+    rather than let an unexpected character (em dash, curly quote, emoji, …) in
+    AI-generated text crash report generation."""
+    return str(text if text is not None else "").encode("latin-1", "replace").decode("latin-1")
+
+
+def _build_csv_report(run: dict, cves: list[dict]) -> str:
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(_REPORT_COLUMNS)
+    for c in cves:
+        writer.writerow(_cve_report_row(c))
+    return buf.getvalue()
+
+
+def _build_pdf_report(run: dict, cves: list[dict]) -> bytes:
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=14)
+    pdf.add_page()
+
+    def _line(text: str, size: int = 9, bold: bool = False, h: int = 5) -> None:
+        pdf.set_font("Helvetica", "B" if bold else "", size)
+        # w=0 means "use the width from the current x to the right margin" — if
+        # the previous call left the cursor mid-line, that width can be razor
+        # thin (or negative), so always reset to the left margin first.
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(0, h, _pdf_safe(text), new_x="LMARGIN", new_y="NEXT")
+
+    _line(f"Vulnerability Report — {run.get('image_ref', '')}", size=14, bold=True, h=8)
+    _line(f"Run ID: {run.get('run_id', '')}")
+    approved = sum(1 for c in cves if c.get("status") == "approved")
+    rejected = sum(1 for c in cves if c.get("status") == "rejected")
+    _line(f"Total CVEs: {len(cves)}  |  Approved: {approved}  |  Rejected: {rejected}")
+    pdf.ln(4)
+
+    for c in cves:
+        _line(
+            f"{c.get('id', '')} — {str(c.get('severity', '')).upper()} "
+            f"(CVSS {c.get('cvss', '')}) — {str(c.get('status', '')).upper()}",
+            size=10, bold=True, h=6,
+        )
+        _line(
+            f"Package: {c.get('pkg', '')} {c.get('version', '')}    "
+            f"Fixed in: {c.get('fixed_in', '') or 'N/A'}"
+        )
+        if c.get("rationale"):
+            _line("Justification:", bold=True)
+            _line(c["rationale"])
+        if c.get("remediation"):
+            _line("Remediation:", bold=True)
+            _line(c["remediation"])
+        if c.get("manual_notes"):
+            _line("Manual Notes:", bold=True)
+            _line(c["manual_notes"])
+        pdf.ln(2)
+        pdf.set_draw_color(200, 200, 200)
+        pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+        pdf.ln(3)
+
+    return bytes(pdf.output())
+
+
+@app.get("/run/{run_id}/report")
+def get_run_report(run_id: str, format: str = "csv"):
+    """
+    Download a report of a run's CVEs (justification + remediation + manual notes).
+
+    Works for any run regardless of its approval mix — the frontend decides when
+    to show the download affordance (e.g. only once every CVE is approved).
+    """
+    run = db_get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    cves = get_cves(run_id)
+    fmt = (format or "csv").lower()
+
+    if fmt == "csv":
+        filename = _report_filename(run.get("image_ref", ""), run_id, "csv")
+        content = _build_csv_report(run, cves)
+        return Response(
+            content=content,
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    if fmt == "pdf":
+        filename = _report_filename(run.get("image_ref", ""), run_id, "pdf")
+        content = _build_pdf_report(run, cves)
+        return Response(
+            content=content,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    raise HTTPException(status_code=400, detail="format must be 'csv' or 'pdf'")
 
 
 @app.get("/scan-image/stream")

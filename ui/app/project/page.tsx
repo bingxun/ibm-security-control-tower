@@ -12,6 +12,29 @@ interface ImageRow {
   scan: ScanSummary;
 }
 
+// Same API base pattern used in lib/api.ts — kept local here since that file
+// doesn't export the constant.
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+/**
+ * "completed" alone only means every CVE got a human decision — it says
+ * nothing about whether any were rejected. The report/download affordance is
+ * for the stricter case the user actually asked for: every CVE in the image
+ * is approved and none were rejected.
+ */
+function isFullyApproved(scan: ScanSummary): boolean {
+  return (
+    scan.status === "completed" &&
+    scan.rejected === 0 &&
+    scan.approved === scan.totalCves &&
+    scan.totalCves > 0
+  );
+}
+
+function reportUrl(runId: string, format: "csv" | "pdf" = "csv"): string {
+  return `${API_BASE}/run/${runId}/report?format=${format}`;
+}
+
 // ── Inner page (uses useSearchParams) ────────────────────────────────────
 function ProjectPageInner() {
   const searchParams = useSearchParams();
@@ -202,8 +225,46 @@ function ProjectPageInner() {
                   </div>
 
                   {/* Scan Progress */}
-                  <div className="col-span-2">
+                  <div className="col-span-2 flex flex-col items-start gap-1.5">
                     <RunStatusBadge status={row.scan.status} />
+                    {isFullyApproved(row.scan) && (
+                      <>
+                        <span
+                          className="text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wide inline-flex items-center gap-1"
+                          style={{ background: "var(--accent-green-bg)", color: "var(--accent-green)" }}
+                          title="Every CVE in this image has been reviewed and approved, with no rejections"
+                        >
+                          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                          All Approved
+                        </span>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`Download CSV report for ${row.image}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            window.open(reportUrl(row.scan.id, "csv"), "_blank");
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              window.open(reportUrl(row.scan.id, "csv"), "_blank");
+                            }
+                          }}
+                          className="text-[10px] font-semibold px-2 py-0.5 rounded-full inline-flex items-center gap-1 cursor-pointer transition-opacity hover:opacity-75"
+                          style={{ background: "var(--surface2)", color: "var(--accent-blue)", border: "1px solid var(--border)" }}
+                        >
+                          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 3v12" /><polyline points="7 10 12 15 17 10" /><path d="M5 21h14" />
+                          </svg>
+                          Download Report
+                        </span>
+                      </>
+                    )}
                   </div>
 
                   {/* Date */}

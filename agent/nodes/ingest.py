@@ -88,7 +88,9 @@ def ingest_node(state: AgentState) -> dict:
                     description=vuln.get("Description", ""),
                     rationale="",       # filled by synthesis
                     remediation="",     # filled by synthesis
+                    manual_notes="",
                     edited=False,
+                    edited_by_role="",
                     rag_match=None,     # filled by synthesis
                     status="queued",
                 )

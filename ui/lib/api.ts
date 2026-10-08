@@ -76,6 +76,8 @@ export interface DecisionPayload {
   cve_id: string;
   decision: "approved" | "rejected";
   edited_rationale?: string;
+  pkg?: string; // disambiguates a cve_id shared by multiple packages
+  edited_by_role?: string; // role of the user who added manual notes
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────

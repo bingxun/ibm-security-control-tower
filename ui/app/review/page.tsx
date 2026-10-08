@@ -9,7 +9,7 @@ import CveQueue from "@/components/CveQueue";
 import CveReview from "@/components/CveReview";
 import ContextPanel from "@/components/ContextPanel";
 import { MOCK_STATS } from "@/lib/mockData";
-import { CveRecord, AgentStep, RunStats } from "@/lib/types";
+import { CveRecord, AgentStep, RunStats, cveKey } from "@/lib/types";
 import { streamRun, submitDecision, getRun } from "@/lib/api";
 
 // ── Synthesis progress screen ──────────────────────────────────────────────
@@ -227,8 +227,9 @@ function ReviewPageInner() {
         setCves(event.cves);
         setSelectedId((prev) => {
           if (prev) return prev;
-          return event.cves!.find((c: any) => c.status === "pending" || c.status === "queued")?.id
-            ?? event.cves![0]?.id ?? "";
+          const firstActionable = event.cves!.find((c: any) => c.status === "pending" || c.status === "queued");
+          const fallback = event.cves![0];
+          return firstActionable ? cveKey(firstActionable) : fallback ? cveKey(fallback) : "";
         });
       }
       if (event.agent_steps) setAgentSteps(event.agent_steps);
@@ -288,17 +289,25 @@ function ReviewPageInner() {
   const handleDecision = useCallback(async (
     id: string,
     decision: "approved" | "rejected",
-    editedRationale?: string
+    editedRationale?: string,
+    pkg?: string,
+    editedByRole?: string
   ) => {
+    // `pkg` disambiguates CVEs that share an id across multiple packages in
+    // the same run (e.g. musl + musl-utils) — match on both when available
+    // so a decision never lands on the wrong (or every matching) entry.
+    const matches = (c: CveRecord) => c.id === id && (pkg === undefined || c.pkg === pkg);
+
     // Optimistic update
     setCves((prev) =>
       prev.map((c) =>
-        c.id === id
+        matches(c)
           ? {
               ...c,
               status: decision,
-              rationale: editedRationale ?? c.rationale,
+              manualNotes: editedRationale ?? c.manualNotes,
               edited: editedRationale ? true : c.edited,
+              editedByRole: editedRationale ? editedByRole : c.editedByRole,
             }
           : c
       )
@@ -306,11 +315,11 @@ function ReviewPageInner() {
 
     // Auto-advance to next pending CVE
     setCves((prev) => {
-      const currentIndex = prev.findIndex((c) => c.id === id);
+      const currentIndex = prev.findIndex(matches);
       const next = prev
         .slice(currentIndex + 1)
         .find((c) => c.status === "pending" || c.status === "queued");
-      if (next) setSelectedId(next.id);
+      if (next) setSelectedId(cveKey(next));
       return prev;
     });
 
@@ -328,6 +337,8 @@ function ReviewPageInner() {
           cve_id: id,
           decision,
           edited_rationale: editedRationale,
+          pkg,
+          edited_by_role: editedByRole,
         });
         showToast(
           decision === "approved" ? "Decision accepted and queued for persistence" : "CVE rejected",
@@ -346,7 +357,7 @@ function ReviewPageInner() {
   }, [runId, showToast]);
 
   // ── Derived ───────────────────────────────────────────────────────────────
-  const selectedCve = cves.find((c) => c.id === selectedId) ?? cves[0];
+  const selectedCve = cves.find((c) => cveKey(c) === selectedId) ?? cves[0];
   const reviewedCount = useMemo(
     () => cves.filter((c) => c.status === "approved" || c.status === "rejected").length,
     [cves]
