@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import TopNav from "@/components/TopNav";
 import RequireAuth from "@/components/RequireAuth";
-import { startScan } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { startScan, listProjects, type Project } from "@/lib/api";
 
 // ── Form shape ─────────────────────────────────────────────────────────────
 interface ScanForm {
@@ -35,9 +36,10 @@ const SEVERITY_LEVELS = ["critical", "high", "medium", "low"] as const;
 
 // ── Micro-components ───────────────────────────────────────────────────────
 
-function Label({ children }: { children: React.ReactNode }) {
+function Label({ children, htmlFor }: { children: React.ReactNode; htmlFor?: string }) {
   return (
     <label
+      htmlFor={htmlFor}
       className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5"
       style={{ color: "var(--muted)" }}
     >
@@ -80,19 +82,27 @@ function Input({
   );
 }
 
+type SelectOption = string | { value: string; label: string };
+
 function Select({
   value,
   onChange,
   options,
   disabled = false,
+  id,
+  placeholder,
 }: {
   value: string;
   onChange: (v: string) => void;
-  options: string[];
+  options: SelectOption[];
   disabled?: boolean;
+  id?: string;
+  placeholder?: string;
 }) {
+  const items = options.map((o) => (typeof o === "string" ? { value: o, label: o } : o));
   return (
     <select
+      id={id}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
@@ -108,9 +118,12 @@ function Select({
         backgroundPosition: "right 12px center",
         paddingRight: "32px",
       }}
+      onFocus={(e) => (e.target.style.borderColor = "var(--accent-blue)")}
+      onBlur={(e) => (e.target.style.borderColor = "var(--border)")}
     >
-      {options.map((o) => (
-        <option key={o} value={o}>{o}</option>
+      {placeholder !== undefined && <option value="">{placeholder}</option>}
+      {items.map((o) => (
+        <option key={o.value} value={o.value}>{o.label}</option>
       ))}
     </select>
   );
@@ -177,6 +190,19 @@ function NewScanPageInner() {
     autoApproveBelow: "none",
   });
 
+  const { permissions } = useAuth();
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [projectsError, setProjectsError] = useState("");
+  const [projectsRetry, setProjectsRetry] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    listProjects().then(items => { if (!cancelled) setProjects(items); })
+      .catch(error => { if (!cancelled) setProjectsError(error.message); })
+      .finally(() => { if (!cancelled) setProjectsLoading(false); });
+    return () => { cancelled = true; };
+  }, [projectsRetry]);
+
   const [launching, setLaunching] = useState(false);
   const [error, setError]         = useState<string | null>(null);
 
@@ -221,7 +247,8 @@ function NewScanPageInner() {
   const canLaunch =
     form.imageRef.trim().length > 0 &&
     !imageRefError &&
-    form.projectId.trim().length > 0 &&
+    projects.some(project => project.id === form.projectId) &&
+    !projectsLoading && !projectsError &&
     !launching;
 
   const handleLaunch = async () => {
@@ -236,7 +263,7 @@ function NewScanPageInner() {
         cisProfile: form.cisProfile,
         severityThreshold: form.severityThreshold,
         scanner: form.scanner,
-        autoApproveBelow: form.autoApproveBelow,
+        autoApproveBelow: permissions?.canApprove ? form.autoApproveBelow : "none",
         // no trivyJson — backend runs Trivy itself
       });
       router.push(`/review?run=${run_id}`);
@@ -373,14 +400,17 @@ function NewScanPageInner() {
             <div className="flex flex-col gap-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <Label>Project ID <span style={{ color: "var(--accent-red)" }}>*</span></Label>
-                  <Input
-                    placeholder="e.g. CLOUD-247"
+                  <Label htmlFor="scan-project">Project <span style={{ color: "var(--accent-red)" }}>*</span></Label>
+                  <Select
+                    id="scan-project"
                     value={form.projectId}
                     onChange={(v) => set("projectId", v)}
-                    mono
-                    disabled={launching}
+                    disabled={launching || projectsLoading || !!projectsError}
+                    placeholder={projectsLoading ? "Loading projects…" : "Select a project"}
+                    options={projects.map((project) => ({ value: project.id, label: project.name }))}
                   />
+                  {projectsError && <div role="alert" className="text-[11px] mt-1.5 flex items-center gap-2" style={{ color: "var(--accent-red)" }}><span>{projectsError}</span><button type="button" className="underline" onClick={() => { setProjectsError(""); setProjectsLoading(true); setProjectsRetry(n => n + 1); }}>Retry</button></div>}
+                  {!projectsLoading && !projectsError && projects.length === 0 && <p className="text-[11px] mt-1.5" style={{ color: "var(--muted)" }}>No projects assigned. Contact your super admin.</p>}
                 </div>
                 <div>
                   <Label>Cloud Provider</Label>
@@ -524,7 +554,7 @@ function NewScanPageInner() {
               <div>
                 <Label>Auto-approve below</Label>
                 <div className="flex flex-col gap-2 mb-3">
-                  {(["none", "low", "medium"] as const).map((opt) => {
+                  {(permissions?.canApprove ? ["none", "low", "medium"] as const : ["none"] as const).map((opt) => {
                     const isSelected = form.autoApproveBelow === opt;
                     return (
                       <label
@@ -609,7 +639,7 @@ function NewScanPageInner() {
               ) : (
                 <p className="text-[13px]" style={{ color: "var(--muted)" }}>
                   Fill in <span style={{ color: "var(--heading)" }}>Image name</span> and{" "}
-                  <span style={{ color: "var(--heading)" }}>Project ID</span> to launch
+                  <span style={{ color: "var(--heading)" }}>Project</span> to launch
                 </p>
               )}
             </div>

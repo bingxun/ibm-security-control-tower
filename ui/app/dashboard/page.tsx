@@ -2,9 +2,12 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import management from "@/components/Management.module.css";
+import ProjectIcon from "@/components/ProjectIcon";
 import TopNav from "@/components/TopNav";
 import RequireAuth from "@/components/RequireAuth";
-import { listScans, getDashboardStats, ScanSummary, DashboardStats } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { listProjects, type Project, listScans, getDashboardStats, ScanSummary, DashboardStats } from "@/lib/api";
 
 function SevBadge({ label, count, color }: { label: string; count: number; color: string }) {
   if (count === 0) return null;
@@ -18,8 +21,8 @@ function SevBadge({ label, count, color }: { label: string; count: number; color
   );
 }
 
-function StatusChip({ status, approved, total }: { status: string; approved: number; total: number }) {
-  const pct = Math.round((approved / total) * 100);
+function StatusChip({ approved, total }: { status: string; approved: number; total: number }) {
+  const pct = total ? Math.round((approved / total) * 100) : 0;
   return (
     <div className="flex items-center gap-2">
       <div
@@ -50,26 +53,35 @@ const EMPTY_STATS: DashboardStats = {
 };
 
 function DashboardPageInner() {
+  const { user, permissions } = useAuth();
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectId, setProjectId] = useState<string | undefined>(undefined);
+  const [retry, setRetry] = useState(0);
   const [scans, setScans] = useState<ScanSummary[]>([]);
   const [dashStats, setDashStats] = useState<DashboardStats>(EMPTY_STATS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([listScans(), getDashboardStats()])
-      .then(([s, d]) => {
-        setScans(s);
-        setDashStats(d);
+    let cancelled = false;
+    Promise.all([listScans(projectId), getDashboardStats(projectId), listProjects()])
+      .then(([s, d, p]) => {
+        if (!cancelled) { setScans(s); setDashStats(d); setProjects(p); }
       })
-      .catch((e) => setError(e.message ?? "Failed to reach backend"))
-      .finally(() => setLoading(false));
-  }, []);
+      .catch((e) => { if (!cancelled) setError(e.message ?? "Failed to reach backend"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [projectId, retry]);
+  const refresh = (id: string | undefined) => {
+    setScans([]); setDashStats(EMPTY_STATS); setLoading(true); setError(null);
+    setProjectId(id); setRetry(n => n + 1);
+  };
 
   const statsRow = [
     { label: "Total scans",        value: String(dashStats.totalScans),               sub: "all time",          color: "var(--accent-blue)"   },
     { label: "CVEs triaged",       value: String(dashStats.cvesTriaged),              sub: "across all scans",  color: "var(--accent-purple)" },
     { label: "Avg. approval rate", value: `${dashStats.avgApprovalRate}%`,            sub: "first-pass",        color: "var(--accent-green)"  },
-    { label: "Time saved",         value: "~18h",                                     sub: "vs. manual triage", color: "var(--accent-yellow)" },
+    { label: "RAG decisions", value: String(dashStats.ragDecisions), sub: "accessible projects", color: "var(--accent-yellow)" },
   ];
 
   return (
@@ -92,12 +104,12 @@ function DashboardPageInner() {
                 Security Control Tower
               </h1>
               <p className="text-[14px] mt-1" style={{ color: "var(--subtle)" }}>
-                Welcome back, <span style={{ color: "var(--heading)" }}>Auth Lead</span>.
-                You have <span style={{ color: "var(--accent-yellow)" }}>5 CVEs</span> pending review.
+                Welcome back, <span style={{ color: "var(--heading)" }}>{user?.name}</span>.
+                Showing {user?.role === "SUPER_ADMIN" ? "all projects" : "your assigned projects"}.
               </p>
             </div>
 
-            <Link
+            {permissions?.canScan && <Link
               href="/new-scan"
               className="flex items-center gap-2.5 px-6 py-3 rounded-xl text-[14px] font-bold flex-shrink-0 transition-opacity hover:opacity-85"
               style={{
@@ -110,9 +122,27 @@ function DashboardPageInner() {
                 <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
               </svg>
               New Scan
-            </Link>
+            </Link>}
           </div>
 
+          <div className={management.filter}>
+            <span className={management.projectIcon}><ProjectIcon /></span>
+            <label htmlFor="dashboard-project" className={management.filterLabel}>Project</label>
+            <select id="dashboard-project" className={management.select} value={projectId === undefined ? "__all__" : projectId} onChange={e => refresh(e.target.value === "__all__" ? undefined : e.target.value)} disabled={loading}>
+              <option value="__all__">{user?.role === "SUPER_ADMIN" ? "All projects" : "All assigned projects"}</option>
+              {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <button className={management.button} onClick={() => refresh(projectId)} disabled={loading}>Refresh</button>
+            {!loading && !error && projects.length === 0 && <p className="text-sm text-[var(--faint)]">{permissions?.canManageProjects ? "Create a project in Settings to get started." : "No projects assigned. Contact your super admin."}</p>}
+          </div>
+          {!loading && !error && projects.length > 0 && <section aria-label="Project overview" className="space-y-4">
+            <div className={management.toolbar}><div className="flex items-center gap-2"><h2 className="text-sm font-semibold">{user?.role === "SUPER_ADMIN" ? "Your workspace projects" : "Assigned projects"}</h2><span className={management.count}>{projects.length}</span></div>{permissions?.canManageProjects && <Link href="/settings" className="text-xs font-semibold text-[var(--accent-blue)]">Manage projects →</Link>}</div>
+            <div className={management.projectGrid}>{projects.map(project => <button key={project.id} className={management.projectCard} aria-pressed={projectId === project.id} onClick={() => refresh(project.id)}>
+              <span className={management.projectIcon}><ProjectIcon /></span>
+              <div><h3 className={management.projectTitle}>{project.name}</h3><p className={management.projectDescription}>{project.description || "Container security workspace"}</p></div>
+              <span className={management.projectAction}>View scans <span aria-hidden="true">→</span></span>
+            </button>)}</div>
+          </section>}
           {/* ── Stats row ── */}
           <div className="grid grid-cols-4 gap-4">
             {statsRow.map((s) => (
@@ -252,9 +282,10 @@ function DashboardPageInner() {
                   onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                 >
                   {/* ID */}
-                  <div className="col-span-1">
+                  <div className="col-span-1 min-w-0 pr-3">
                     <span
-                      className="text-[11px] font-mono font-semibold"
+                      title={scan.id}
+                      className="block truncate text-[11px] font-mono font-semibold"
                       style={{ color: "var(--accent-blue)" }}
                     >
                       {scan.id}
@@ -262,12 +293,13 @@ function DashboardPageInner() {
                   </div>
 
                   {/* Project */}
-                  <div className="col-span-2">
+                  <div className="col-span-2 min-w-0 pr-3">
                     <span
-                      className="text-[12px] font-mono font-semibold px-2 py-0.5 rounded"
+                      title={projects.find(p => p.id === scan.project)?.name ?? scan.project}
+                      className="block truncate text-[12px] font-semibold px-2 py-1 rounded-md"
                       style={{ background: "var(--surface2)", color: "var(--faint)", border: "1px solid var(--border)" }}
                     >
-                      {scan.project}
+                      {projects.find(p => p.id === scan.project)?.name ?? scan.project}
                     </span>
                   </div>
 
@@ -341,7 +373,7 @@ function DashboardPageInner() {
                 RAG Memory Store — {dashStats.ragDecisions} decisions persisted
               </p>
               <p className="text-[12px] mt-0.5" style={{ color: "var(--subtle)" }}>
-                Every approved rationale is stored and reused for future scans. Your team's security knowledge compounds over time — reducing synthesis time and improving first-pass approval rates.
+                Every approved rationale is stored and reused for future scans. Your team&apos;s security knowledge compounds over time — reducing synthesis time and improving first-pass approval rates.
               </p>
             </div>
             <div className="text-right flex-shrink-0">

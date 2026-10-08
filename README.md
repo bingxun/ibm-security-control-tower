@@ -129,3 +129,39 @@ FastAPI ──► LangGraph pipeline
 | `MILVUS_DB_PATH` | Path to RAG JSON store file | `./data/rag_memory.json` |
 | `API_HOST` | Bind host | `0.0.0.0` |
 | `API_PORT` | Bind port | `8000` |
+
+### Project access
+
+- **Super Admin** creates projects, manages accounts and assignments, and sees all projects.
+- **Admin** scans and reviews only assigned projects.
+- **DevOps Engineer** scans only assigned projects; cannot approve findings or enable auto-approval.
+- **Cyber Manager** reviews only assigned projects; cannot launch scans.
+- Accounts with no assignments see no project data. Membership is checked by the API for lists,
+  statistics, scan creation, run details, decisions, and streams, not just by the UI.
+
+On first startup with this version, the existing active `admin@controltower.local` admin is
+promoted to Super Admin. Set `SUPER_ADMIN_EMAIL` before startup to use another existing admin.
+The migration runs once; it does not reset passwords or promote accounts on subsequent starts.
+A fresh installation seeds the default account as Super Admin.
+
+Existing scan project IDs are imported into Projects without automatically assigning users.
+Sign in as Super Admin, open **Settings → Projects**, create projects as needed, choose
+**Assign users**, and save assignments. Create accounts in **Users & Roles** first.
+New Scan only offers accessible projects; the dashboard can filter accessible projects.
+
+RAG lookup is restricted to the current project. Historical generated rationale and logs may
+contain cross-project context, so pre-migration generated content is visible only to Super Admin.
+Raw historical findings remain available to assigned users; run a new scan for isolated analysis.
+MCP memory tools require a valid `session_token` and project access; they no longer provide
+unauthenticated global memory access.
+
+Validation:
+
+```bash
+.venv/bin/python -m unittest discover -s tests -v
+# Start an isolated backend for browser checks (do not use the real database):
+DB_PATH=/tmp/project-check.db MILVUS_DB_PATH=/tmp/project-rag-check.json .venv/bin/uvicorn api.main:app --port 18001
+# With the UI running on localhost:3000:
+cd ui
+PROJECTS_TEST_API=http://127.0.0.1:18001 node scripts/check-projects.mjs
+```

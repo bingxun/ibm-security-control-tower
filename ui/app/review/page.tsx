@@ -7,9 +7,9 @@ import RequireAuth from "@/components/RequireAuth";
 import CveQueue from "@/components/CveQueue";
 import CveReview from "@/components/CveReview";
 import ContextPanel from "@/components/ContextPanel";
-import { MOCK_STATS } from "@/lib/mockData";
+
 import { CveRecord, AgentStep, RunStats } from "@/lib/types";
-import { streamRun, submitDecision, getRun } from "@/lib/api";
+import { streamRun, submitDecision, getRun, type ScanRun } from "@/lib/api";
 
 // ── Synthesis progress screen ──────────────────────────────────────────────
 function SynthesisLoader({
@@ -167,14 +167,17 @@ function SynthesisLoader({
 function ReviewPageInner() {
   const searchParams = useSearchParams();
   const runId = searchParams.get("run");
+  return <ReviewContent key={runId} runId={runId} />;
+}
 
+function ReviewContent({ runId }: { runId: string | null }) {
   // ── State ────────────────────────────────────────────────────────────────
   const [cves, setCves] = useState<CveRecord[]>([]);
   const [agentSteps, setAgentSteps] = useState<AgentStep[]>([]);
-  const [stats, setStats] = useState<RunStats>(MOCK_STATS);
+  const [stats, setStats] = useState<RunStats>({ total: 0, approved: 0, rejected: 0, avgSynthesisS: 0, ragHits: 0, tokensUsed: 0 });
   const [tokenFragment, setTokenFragment] = useState("");
   const [selectedId, setSelectedId] = useState<string>("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(runId));
   const [agentStatus, setAgentStatus] = useState<"running" | "awaiting" | "done" | "error">("running");
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
   const [trivyLogs, setTrivyLogs] = useState<string[]>([]);
@@ -199,10 +202,7 @@ function ReviewPageInner() {
 
   // ── Load / stream data ───────────────────────────────────────────────────
   useEffect(() => {
-    if (!runId) {
-      setLoading(false);
-      return;
-    }
+    if (!runId) return;
 
     // Quick existence check before opening SSE — gives a clear 404 message
     // if the backend restarted and lost the run from memory.
@@ -210,13 +210,14 @@ function ReviewPageInner() {
     getRun(runId)
       .catch(() => {
         if (!cancelled) {
-          setRunError("Run not found — the backend restarted and lost this session. Please start a new scan.");
+          setRunError("This run is unavailable or no longer assigned to you.");
           setLoading(false);
         }
       });
 
     // Helper: apply a run snapshot to all state setters
-    const applySnapshot = (event: Partial<ReturnType<typeof getRun> extends Promise<infer T> ? T : never> & Record<string, any>) => {
+    const applySnapshot = (event: Partial<ScanRun>) => {
+      if (cancelled) return;
       if (event.project_id) setProjectId(event.project_id);
       if (event.image_ref)  setImageRef(event.image_ref);
       if (event.trivy_logs && event.trivy_logs.length > 0) setTrivyLogs(event.trivy_logs);
@@ -226,7 +227,7 @@ function ReviewPageInner() {
         setCves(event.cves);
         setSelectedId((prev) => {
           if (prev) return prev;
-          return event.cves!.find((c: any) => c.status === "pending" || c.status === "queued")?.id
+          return event.cves!.find((c) => c.status === "pending" || c.status === "queued")?.id
             ?? event.cves![0]?.id ?? "";
         });
       }
@@ -246,7 +247,9 @@ function ReviewPageInner() {
     // Poll fallback — called when SSE ends without a terminal status
     const pollFallback = () => {
       getRun(runId).then(applySnapshot).catch(() => {
-        setRunError("Run not found — the backend may have restarted. Please start a new scan.");
+        if (cancelled) return;
+        setCves([]); setAgentSteps([]); setTrivyLogs([]); setProjectId(""); setImageRef("");
+        setRunError("This run is unavailable or no longer assigned to you.");
         setLoading(false);
       });
     };
@@ -255,13 +258,13 @@ function ReviewPageInner() {
       runId,
       applySnapshot,
       () => {
-        // SSE stream ended cleanly — if still loading, poll once for final state
-        setLoading((prev) => { if (prev) pollFallback(); return prev; });
+        // Recheck access when a stream closes, including membership revocation.
+        pollFallback();
       },
       (err) => {
         console.warn("SSE error:", err);
         if (err.message?.includes("404") || err.message?.includes("not found")) {
-          setRunError("Run not found — the backend may have restarted and lost this session. Please start a new scan.");
+          setRunError("This run is unavailable or no longer assigned to you.");
           setLoading(false);
         } else {
           // Non-404 SSE error — try polling once before showing error
@@ -289,53 +292,13 @@ function ReviewPageInner() {
     decision: "approved" | "rejected",
     editedRationale?: string
   ) => {
-    // Optimistic update
-    setCves((prev) =>
-      prev.map((c) =>
-        c.id === id
-          ? { ...c, status: decision, rationale: editedRationale ?? c.rationale }
-          : c
-      )
-    );
-
-    // Auto-advance to next pending CVE
-    setCves((prev) => {
-      const currentIndex = prev.findIndex((c) => c.id === id);
-      const next = prev
-        .slice(currentIndex + 1)
-        .find((c) => c.status === "pending" || c.status === "queued");
-      if (next) setSelectedId(next.id);
-      return prev;
-    });
-
-    // Update stats
-    setStats((prev) => ({
-      ...prev,
-      approved: decision === "approved" ? prev.approved + 1 : prev.approved,
-      rejected: decision === "rejected" ? prev.rejected + 1 : prev.rejected,
-    }));
-
-    // Submit to backend if we have a real run
-    if (runId) {
-      try {
-        await submitDecision(runId, {
-          cve_id: id,
-          decision,
-          edited_rationale: editedRationale,
-        });
-        showToast(
-          decision === "approved" ? "Decision accepted and queued for persistence" : "CVE rejected",
-          "success"
-        );
-      } catch (err) {
-        console.warn("Failed to submit decision:", err);
-        showToast("Decision saved locally (backend unavailable)", "error");
-      }
-    } else {
-      showToast(
-        decision === "approved" ? "Accepted" : "Rejected",
-        "success"
-      );
+    if (!runId) return;
+    try {
+      await submitDecision(runId, { cve_id: id, decision, edited_rationale: editedRationale });
+      setCves(prev => prev.map(c => c.id === id ? { ...c, status: decision, rationale: editedRationale ?? c.rationale } : c));
+      showToast("Decision saved", "success");
+    } catch {
+      showToast("Decision was not saved. Check your project access and try again.", "error");
     }
   }, [runId, showToast]);
 

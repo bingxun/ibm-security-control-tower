@@ -2,13 +2,13 @@
 Node 02 — Context Synthesis
 For each CVE:
   1. Query RAG memory for similar past decisions
-  2. Call IBM RAD gateway (Anthropic-compatible) to generate a mitigation rationale
+  2. Call IBM Services Essentials gateway (OpenAI-compatible) to generate a mitigation rationale
   3. Falls back to an offline stub if the gateway is unreachable
 
 Set env vars:
-  ANTHROPIC_BASE_URL   = https://llm.ibm-rad.com   (or any LiteLLM gateway)
-  ANTHROPIC_AUTH_TOKEN = sk-...                     (your RAD usage key)
-  RAD_MODEL            = global.anthropic.claude-sonnet-4-6 (optional, default below)
+  ANTHROPIC_BASE_URL   = https://api.servicesessentials.ibm.com
+  ANTHROPIC_AUTH_TOKEN = sk-...                     (your gateway API key)
+  RAD_MODEL            = claude-sonnet-4-6          (optional, default below)
   RAD_CONCURRENCY      = 5   (max parallel LLM calls, default 5)
   RAD_RETRIES          = 3   (retries on rate-limit / 5xx, default 3)
 """
@@ -30,22 +30,22 @@ logger = logging.getLogger("control_tower")
 # ── IBM RAD / Anthropic gateway config ────────────────────────────────────
 RAD_BASE_URL    = os.getenv("ANTHROPIC_BASE_URL", "https://llm.ibm-rad.com")
 RAD_AUTH_TOKEN  = os.getenv("ANTHROPIC_AUTH_TOKEN", "")
-RAD_MODEL       = os.getenv("RAD_MODEL", "global.anthropic.claude-sonnet-4-6")
+RAD_MODEL       = os.getenv("RAD_MODEL", "claude-sonnet-4-6")
 RAD_TIMEOUT     = int(os.getenv("RAD_TIMEOUT", "60"))    # seconds per CVE
 RAD_CONCURRENCY = int(os.getenv("RAD_CONCURRENCY", "5")) # parallel calls
 RAD_RETRIES     = int(os.getenv("RAD_RETRIES", "3"))     # retries on 429/5xx
 RAD_MAX_LLM     = int(os.getenv("RAD_MAX_LLM", "20"))    # max CVEs to call LLM for (top by CVSS)
 
 
-# ── Anthropic messages API client (sync, called from thread pool) ──────────
+# ── OpenAI-compatible chat completions client (sync, called from thread pool) ──
 
 def _rad_generate_sync(prompt: str) -> str:
     """
-    Call the IBM RAD gateway (Anthropic-compatible /v1/messages endpoint).
+    Call the IBM Services Essentials gateway (OpenAI-compatible /v1/chat/completions).
     Returns the generated text, or raises on error.
     Runs synchronously — called via asyncio.to_thread.
     """
-    url = f"{RAD_BASE_URL.rstrip('/')}/v1/messages"
+    url = f"{RAD_BASE_URL.rstrip('/')}/v1/chat/completions"
 
     payload = json.dumps({
         "model":      RAD_MODEL,
@@ -59,9 +59,8 @@ def _rad_generate_sync(prompt: str) -> str:
         url,
         data=payload,
         headers={
-            "Content-Type":      "application/json",
-            "x-api-key":         RAD_AUTH_TOKEN,
-            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+            "x-api-key":    RAD_AUTH_TOKEN,
         },
         method="POST",
     )
@@ -70,20 +69,20 @@ def _rad_generate_sync(prompt: str) -> str:
         try:
             with urllib.request.urlopen(req, timeout=RAD_TIMEOUT) as resp:
                 body = json.loads(resp.read().decode())
-            content = body.get("content", [])
-            if content and content[0].get("type") == "text":
-                return content[0]["text"].strip()
-            raise RuntimeError(f"Unexpected RAD response: {body}")
+            choices = body.get("choices", [])
+            if choices and choices[0].get("message", {}).get("content"):
+                return choices[0]["message"]["content"].strip()
+            raise RuntimeError(f"Unexpected gateway response: {body}")
         except urllib.error.HTTPError as e:
             if e.code in (429, 529) and attempt < RAD_RETRIES - 1:
                 # Rate-limited — back off exponentially
                 backoff = 2 ** attempt
-                logger.warning("RAD rate-limited (%s), retrying in %ss (attempt %d/%d)",
+                logger.warning("Gateway rate-limited (%s), retrying in %ss (attempt %d/%d)",
                                e.code, backoff, attempt + 1, RAD_RETRIES)
                 time.sleep(backoff)
                 continue
             raise
-    raise RuntimeError("RAD gateway: exhausted retries")
+    raise RuntimeError("Gateway: exhausted retries")
 
 
 # ── Prompt builder ─────────────────────────────────────────────────────────
@@ -160,6 +159,7 @@ async def _synthesise_one(
             cve_id=cve["id"],
             description=cve["description"],
             severity=cve["severity"],
+            project_id=project_id,
         )
 
         updated_cve = dict(cve)

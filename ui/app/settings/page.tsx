@@ -3,12 +3,13 @@
 import { useState } from "react";
 import TopNav from "@/components/TopNav";
 import RequireAuth from "@/components/RequireAuth";
+import ProjectsSettings from "@/components/ProjectsSettings";
 import UsersSettings from "@/components/UsersSettings";
 import { usePermission } from "@/lib/auth";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type Section = "watsonx" | "rag" | "users" | "scanner" | "notifications" | "danger";
+type Section = "projects" | "watsonx" | "rag" | "users" | "scanner" | "notifications" | "danger";
 
 // ── Shared micro-components ────────────────────────────────────────────────
 
@@ -220,6 +221,7 @@ function SaveButton({ onClick, saved }: { onClick: () => void; saved: boolean })
 // ── Nav sidebar ────────────────────────────────────────────────────────────
 
 const NAV_ITEMS: { id: Section; label: string; icon: React.ReactNode }[] = [
+  { id: "projects", label: "Projects", icon: <span aria-hidden="true">▦</span> },
   {
     id: "watsonx",
     label: "watsonx.ai",
@@ -771,6 +773,7 @@ function DangerSection() {
 // ── Page ───────────────────────────────────────────────────────────────────
 
 const SECTION_COMPONENTS: Record<Section, React.ComponentType> = {
+  projects: ProjectsSettings,
   watsonx: WatsonxSection,
   rag: RagSection,
   users: UsersSettings,
@@ -780,7 +783,7 @@ const SECTION_COMPONENTS: Record<Section, React.ComponentType> = {
 };
 
 function SettingsPageInner() {
-  const [active, setActive] = useState<Section>("watsonx");
+  const [active, setActive] = useState<Section>("projects");
   const canManageUsers = usePermission("canManageUsers");
   const ActiveSection = SECTION_COMPONENTS[active];
 
@@ -829,7 +832,7 @@ function SettingsPageInner() {
 
         {/* Content */}
         <main className="flex-1 overflow-y-auto px-8 py-7">
-          <div className="max-w-2xl mx-auto">
+          <div className="max-w-4xl mx-auto">
             <ActiveSection />
           </div>
         </main>
