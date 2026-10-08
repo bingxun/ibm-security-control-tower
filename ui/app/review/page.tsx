@@ -32,7 +32,7 @@ function SynthesisLoader({
   }, {});
 
   const stages = [
-    { label: "Trivy Scan", done: true  },
+    { label: "Image Scan", done: true  },
     { label: "Ingest",     done: true  },
     { label: "Synthesis",  done: false, active: true },
     { label: "Approval",   done: false, active: false },
@@ -135,12 +135,12 @@ function SynthesisLoader({
         </div>
       </div>
 
-      {/* ── Trivy scan summary ── */}
+      {/* ── Scanner log summary ── */}
       {trivyLogs.length > 0 && (
         <div className="rounded-2xl overflow-hidden" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
           <div className="flex items-center gap-2 px-5 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
             <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--muted)" }}>
-              Trivy Scan Log
+              Scanner Log
             </span>
             <span className="ml-auto text-[10px] font-mono px-1.5 py-0.5 rounded"
               style={{ background: "var(--surface2)", color: "var(--muted)", border: "1px solid var(--border)" }}>
@@ -393,7 +393,7 @@ function ReviewPageInner() {
             </a>
           </div>
         ) : isScanning ? (
-          /* ── Trivy scanning phase ── */
+          /* ── Scanning phase ── */
           <div className="flex-1 flex flex-col items-center justify-center gap-6 px-8">
             <div className="w-full max-w-2xl rounded-2xl overflow-hidden" style={{ background: "var(--surface)", border: "1px solid var(--accent-blue-bdr, var(--border))" }}>
               {/* Header */}
@@ -402,7 +402,7 @@ function ReviewPageInner() {
                   <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
                 </svg>
                 <span className="text-[13px] font-semibold" style={{ color: "var(--accent-blue)" }}>
-                  Scanning image with Trivy…
+                  Scanning image…
                 </span>
                 <span className="ml-auto text-[11px] font-mono px-2 py-0.5 rounded" style={{ background: "var(--surface2)", color: "var(--muted)" }}>
                   {trivyLogs.length} lines
@@ -411,7 +411,7 @@ function ReviewPageInner() {
               {/* Pipeline steps */}
               <div className="flex items-center gap-0 px-5 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
                 {[
-                  { label: "Trivy Scan",    active: true  },
+                  { label: "Image Scan",    active: true  },
                   { label: "CVE Ingest",    active: false },
                   { label: "AI Synthesis",  active: false },
                   { label: "Human Review",  active: false },

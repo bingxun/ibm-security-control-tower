@@ -8,7 +8,7 @@ import { useAuth } from "@/lib/auth";
 
 function PipelineViz() {
   const stages = [
-    { label: "Trivy Scan",   icon: "scan",   color: "var(--accent-blue)"   },
+    { label: "Image Scan",   icon: "scan",   color: "var(--accent-blue)"   },
     { label: "AI Synthesis", icon: "brain",  color: "var(--accent-purple)" },
     { label: "Human Review", icon: "shield", color: "#f97316"              },
     { label: "Persist",      icon: "db",     color: "var(--accent-green)"  },
