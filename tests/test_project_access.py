@@ -82,8 +82,10 @@ class ProjectAccessTests(unittest.TestCase):
             self.assertIn(self.client.get(f'/scan-image/stream?imageRef=nginx&projectId={self.b}', headers=headers).status_code, [403, 404])
         engineer = self.users['DEVOPS_ENGINEER'][1]
         self.assertEqual(self.client.post('/run/run-a/decision', headers=engineer, json={'cve_id': 'CVE-test', 'decision': 'approved'}).status_code, 403)
-        self.assertEqual(self.client.post('/scan', headers=engineer, json={'projectId': self.a, 'imageRef': 'nginx', 'autoApproveBelow': 'low'}).status_code, 403)
+        # Auto-approval is no longer gated by role: the human authorization lives in
+        # the Cyber-published baseline, so any scanner may enable it on their own runs.
         with patch('api.main._run_pipeline', new=AsyncMock()):
+            self.assertEqual(self.client.post('/scan', headers=engineer, json={'projectId': self.a, 'imageRef': 'nginx', 'autoApproveBelow': 'low'}).status_code, 200)
             self.assertEqual(self.client.post('/scan', headers=engineer, json={'projectId': self.a, 'imageRef': 'nginx'}).status_code, 200)
         self.assertEqual(self.client.post('/scan', headers=self.users['CYBER_MANAGER'][1], json={'projectId': self.a, 'imageRef': 'nginx'}).status_code, 403)
 

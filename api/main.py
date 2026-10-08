@@ -85,67 +85,6 @@ GRAPH = build_graph()
 # }
 RUNS: dict[str, dict] = {}
 
-# ── Demo Trivy JSON (used when no file is uploaded) ────────────────────────
-DEMO_TRIVY = {
-    "Results": [
-        {
-            "Target": "demo-image:latest",
-            "Vulnerabilities": [
-                {
-                    "VulnerabilityID": "CVE-2024-3094",
-                    "PkgName": "xz-utils",
-                    "InstalledVersion": "5.6.0",
-                    "FixedVersion": "5.6.1",
-                    "Severity": "CRITICAL",
-                    "Title": "RCE — backdoor in build system",
-                    "Description": "Malicious code was found in xz-utils 5.6.0 and 5.6.1 which, under certain conditions, could allow an attacker to break sshd authentication and gain unauthorized access to the system remotely.",
-                    "CVSS": {"nvd": {"V3Score": 10.0, "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"}},
-                },
-                {
-                    "VulnerabilityID": "CVE-2024-0553",
-                    "PkgName": "gnutls",
-                    "InstalledVersion": "3.7.9",
-                    "FixedVersion": "3.8.3",
-                    "Severity": "HIGH",
-                    "Title": "Info disclosure via session resumption",
-                    "Description": "A vulnerability in GnuTLS allows a server-side timing side-channel attack during RSA-PSK key exchange, allowing a remote attacker to retrieve plaintext.",
-                    "CVSS": {"nvd": {"V3Score": 7.5, "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"}},
-                },
-                {
-                    "VulnerabilityID": "CVE-2023-44487",
-                    "PkgName": "nghttp2",
-                    "InstalledVersion": "1.52.0",
-                    "FixedVersion": "1.57.0",
-                    "Severity": "HIGH",
-                    "Title": "DoS — HTTP/2 RST flood",
-                    "Description": "HTTP/2 Rapid Reset Attack. An attacker can send a stream of RST_STREAM frames causing unbounded CPU consumption on the server, leading to denial of service.",
-                    "CVSS": {"nvd": {"V3Score": 7.5, "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"}},
-                },
-                {
-                    "VulnerabilityID": "CVE-2024-2961",
-                    "PkgName": "glibc",
-                    "InstalledVersion": "2.35",
-                    "FixedVersion": "2.39",
-                    "Severity": "HIGH",
-                    "Title": "Heap buffer overflow in iconv",
-                    "Description": "A buffer overflow in the iconv() function in glibc can be exploited to achieve code execution on systems that use PHP's iconv filter.",
-                    "CVSS": {"nvd": {"V3Score": 8.8, "V3Vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:H"}},
-                },
-                {
-                    "VulnerabilityID": "CVE-2023-4911",
-                    "PkgName": "glibc",
-                    "InstalledVersion": "2.35",
-                    "FixedVersion": "2.38",
-                    "Severity": "CRITICAL",
-                    "Title": "Privilege escalation via ld.so",
-                    "Description": "A buffer overflow in the GNU C Library's dynamic loader ld.so when processing the GLIBC_TUNABLES environment variable could allow a local attacker to gain root privileges.",
-                    "CVSS": {"nvd": {"V3Score": 9.8, "V3Vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"}},
-                },
-            ],
-        }
-    ]
-}
-
 # ── Pydantic models ────────────────────────────────────────────────────────
 
 class ScanRequest(BaseModel):
