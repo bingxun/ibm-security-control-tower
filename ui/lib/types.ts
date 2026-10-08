@@ -16,6 +16,8 @@ export interface RolePermissions {
   canApprove: boolean;    // act on CVEs at all (submit, or accept/reject)
   canReject: boolean;     // reject CVEs — splits the full accept/reject workflow
                           // (Cyber Manager / Super Admin) from submit-only approvers
+  canSubmitForApproval: boolean; // DevOps: send pending CVEs up to Cyber for approval
+  canApproveSubmitted: boolean;  // Cyber: approve/reject CVEs already submitted to them
   canViewSettings: boolean; // access settings page
   canManageProjects: boolean;
   canManageUsers: boolean;  // user management (super admin only)
@@ -29,22 +31,28 @@ export function permissionsForRoles(roles: UserRole[]): RolePermissions {
       canScan: acc.canScan || p.canScan,
       canApprove: acc.canApprove || p.canApprove,
       canReject: acc.canReject || p.canReject,
+      canSubmitForApproval: acc.canSubmitForApproval || p.canSubmitForApproval,
+      canApproveSubmitted: acc.canApproveSubmitted || p.canApproveSubmitted,
       canViewSettings: acc.canViewSettings || p.canViewSettings,
       canManageProjects: acc.canManageProjects || p.canManageProjects,
       canManageUsers: acc.canManageUsers || p.canManageUsers,
     };
-  }, { canScan: false, canApprove: false, canReject: false, canViewSettings: false, canManageProjects: false, canManageUsers: false });
+  }, { canScan: false, canApprove: false, canReject: false, canSubmitForApproval: false, canApproveSubmitted: false, canViewSettings: false, canManageProjects: false, canManageUsers: false });
 }
 
 export const ROLE_PERMISSIONS: Record<UserRole, RolePermissions> = {
-  SUPER_ADMIN:     { canScan: true,  canApprove: true,  canReject: true,  canViewSettings: true,  canManageUsers: true,  canManageProjects: true  },
-  ADMIN:           { canScan: true,  canApprove: true,  canReject: false, canViewSettings: true,  canManageUsers: false, canManageProjects: false },
-  DEVOPS_ENGINEER: { canScan: true,  canApprove: false, canReject: false, canViewSettings: false, canManageUsers: false, canManageProjects: false },
-  CYBER_MANAGER:   { canScan: false, canApprove: true,  canReject: true,  canViewSettings: true,  canManageUsers: false, canManageProjects: false },
+  SUPER_ADMIN:     { canScan: true,  canApprove: true,  canReject: true,  canSubmitForApproval: true,  canApproveSubmitted: true,  canViewSettings: true,  canManageUsers: true,  canManageProjects: true  },
+  ADMIN:           { canScan: true,  canApprove: true,  canReject: false, canSubmitForApproval: false, canApproveSubmitted: false, canViewSettings: true,  canManageUsers: false, canManageProjects: false },
+  // DevOps engineers triage pending findings and submit them (with optional notes)
+  // for Cyber approval — they cannot approve or reject anything themselves.
+  DEVOPS_ENGINEER: { canScan: true,  canApprove: false, canReject: false, canSubmitForApproval: true,  canApproveSubmitted: false, canViewSettings: false, canManageUsers: false, canManageProjects: false },
+  // Cyber Manager is the sole approver of findings DevOps submits upward.
+  CYBER_MANAGER:   { canScan: false, canApprove: true,  canReject: true,  canSubmitForApproval: false, canApproveSubmitted: true,  canViewSettings: true,  canManageUsers: false, canManageProjects: false },
   // DSO Manager is a normal admin PLUS project administration: it can scan,
   // approve (submit, not reject), view settings, and manage projects (create,
-  // see all, assign members) — but cannot manage users/roles.
-  DSO_MANAGER:     { canScan: true,  canApprove: true,  canReject: false, canViewSettings: true,  canManageUsers: false, canManageProjects: true  },
+  // see all, assign members) — but cannot manage users/roles. It cannot act on
+  // findings already submitted to Cyber.
+  DSO_MANAGER:     { canScan: true,  canApprove: true,  canReject: false, canSubmitForApproval: false, canApproveSubmitted: false, canViewSettings: true,  canManageUsers: false, canManageProjects: true  },
 };
 
 export const ROLE_LABELS: Record<UserRole, string> = {
@@ -66,7 +74,7 @@ export const ROLE_COLORS: Record<UserRole, { bg: string; text: string; border: s
 // ── Domain types ───────────────────────────────────────────────────────────
 
 export type Severity = "critical" | "high" | "medium" | "low";
-export type CveStatus = "approved" | "rejected" | "pending" | "queued";
+export type CveStatus = "approved" | "rejected" | "submitted" | "pending" | "queued";
 
 export interface CveRecord {
   id: string;

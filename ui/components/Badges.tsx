@@ -34,9 +34,10 @@ export function SeverityBadge({ severity }: { severity: Severity }) {
 
 export function StatusDot({ status }: { status: CveStatus }) {
   const color =
-    status === "approved" ? "#3fb950" :
-    status === "pending"  ? "#d29922" :
-    status === "rejected" ? "#f85149" : "#3d444d";
+    status === "approved"  ? "#3fb950" :
+    status === "pending"   ? "#d29922" :
+    status === "submitted" ? "#4493f8" :
+    status === "rejected"  ? "#f85149" : "#3d444d";
   return (
     <span
       className="inline-block w-2 h-2 rounded-full flex-shrink-0"

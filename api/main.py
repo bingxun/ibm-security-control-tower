@@ -159,7 +159,7 @@ class ImageScanRequest(BaseModel):
 
 class DecisionRequest(BaseModel):
     cve_id: str
-    decision: str          # "approved" | "rejected"
+    decision: str          # "approved" | "rejected" | "submitted"
     edited_rationale: Optional[str] = None
     pkg: Optional[str] = None  # disambiguates a cve_id shared by multiple packages
     edited_by_role: Optional[str] = None  # role of the user who added manual notes
@@ -394,11 +394,12 @@ async def _run_pipeline(run_id: str, image_ref: str, meta: dict) -> None:
             trivy_json = await _trivy_scan(run_id, image_ref)
 
         initial_state = make_initial_state(
-            trivy_json=trivy_json,
+            scan_json=trivy_json,
             image_ref=image_ref,
             project_id=meta.get("projectId", ""),
             cis_profile=meta.get("cisProfile", "CIS Docker Benchmark v1.6"),
             severity_threshold=meta.get("severityThreshold", "high"),
+            scanner=meta.get("scanner", "trivy"),
             run_id=run_id,
         )
         await _run_agent_async(run_id, initial_state)
@@ -553,6 +554,10 @@ def require_auth(
 SCANNER_ROLES         = {"SUPER_ADMIN", "ADMIN", "DEVOPS_ENGINEER", "DSO_MANAGER"}
 REVIEWER_ROLES        = {"SUPER_ADMIN", "ADMIN", "CYBER_MANAGER", "DSO_MANAGER"}
 REJECTER_ROLES        = {"SUPER_ADMIN", "CYBER_MANAGER"}
+# DevOps engineers submit pending findings for Cyber approval (no direct decide).
+SUBMITTER_ROLES       = {"SUPER_ADMIN", "DEVOPS_ENGINEER"}
+# Once a finding is `submitted`, ONLY Cyber (and super admin) may approve/reject it.
+CYBER_APPROVER_ROLES  = {"SUPER_ADMIN", "CYBER_MANAGER"}
 # Roles that administer projects (create, see all, assign members) and may read
 # the user list to pick assignees. Super admins additionally manage users/roles.
 PROJECT_MANAGER_ROLES = {"SUPER_ADMIN", "DSO_MANAGER"}
@@ -698,10 +703,48 @@ async def stream_run(run_id: str, request: Request, user: dict = Depends(require
     return EventSourceResponse(_generator())
 
 
+def _current_cve_status(run_id: str, cve_id: str, pkg: str | None) -> str | None:
+    """Current persisted status of a CVE, matched by id (+ pkg when given)."""
+    for c in get_cves(run_id):
+        if c.get("id") != cve_id:
+            continue
+        if pkg is not None and c.get("pkg") != pkg:
+            continue
+        return c.get("status")
+    return None
+
+
 @app.post("/run/{run_id}/decision")
-def submit_decision(run_id: str, req: DecisionRequest, background_tasks: BackgroundTasks, user: dict = Depends(require_reviewer)):
-    """Submit a human decision to resume the approval gate."""
+def submit_decision(run_id: str, req: DecisionRequest, background_tasks: BackgroundTasks, user: dict = Depends(require_auth)):
+    """Act on a single finding and resume the approval gate.
+
+    Three actions, each role-gated by the finding's CURRENT status:
+      - `submitted`: DevOps (or super admin) sends a `pending` finding up to Cyber.
+      - `approved`/`rejected` on a `submitted` finding: ONLY Cyber / super admin.
+      - `approved`/`rejected` otherwise (legacy direct flow): existing reviewer rules.
+    """
     check_run(user, run_id)
+
+    if req.decision not in ("approved", "rejected", "submitted"):
+        raise HTTPException(status_code=422, detail="decision must be 'approved', 'rejected', or 'submitted'")
+
+    # Role gating (before the run-state checks) depends on the finding's CURRENT status.
+    roles = _roles(user)
+    current_status = _current_cve_status(run_id, req.cve_id, req.pkg)
+    if req.decision == "submitted":
+        if not (roles & SUBMITTER_ROLES):
+            raise HTTPException(status_code=403, detail="Your role cannot submit findings for approval")
+        if current_status not in (None, "pending"):
+            raise HTTPException(status_code=409, detail="Only a pending finding can be submitted for approval")
+    elif current_status == "submitted":
+        if not (roles & CYBER_APPROVER_ROLES):
+            raise HTTPException(status_code=403, detail="Only Cyber Manager can approve or reject submitted findings")
+    else:
+        if not (roles & REVIEWER_ROLES):
+            raise HTTPException(status_code=403, detail="Your role cannot review findings")
+        if req.decision == "rejected" and not (roles & REJECTER_ROLES):
+            raise HTTPException(status_code=403, detail="Your role cannot reject findings")
+
     if run_id not in RUNS:
         raise HTTPException(status_code=404, detail="Run not found")
 
@@ -711,11 +754,6 @@ def submit_decision(run_id: str, req: DecisionRequest, background_tasks: Backgro
             status_code=409,
             detail=f"Run is not awaiting approval (status: {run['status']})"
         )
-
-    # Only reviewers who can REJECT may record a rejection; other approvers
-    # (Admin/DevOps/DSO) submit approvals only. Mirrors the UI's canReject gate.
-    if req.decision == "rejected" and not (_roles(user) & REJECTER_ROLES):
-        raise HTTPException(status_code=403, detail="Your role cannot reject findings")
 
     # Persist decision to DB immediately (before graph resumes)
     update_cve_decision(

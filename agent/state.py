@@ -24,7 +24,7 @@ class CveRecord(TypedDict):
     edited: bool           # True once a human has added manual notes
     edited_by_role: str    # role of the human who added manual_notes (e.g. "ADMIN")
     rag_match: Optional[dict]  # filled by synthesis node
-    status: str            # queued | pending | approved | rejected
+    status: str            # queued | pending | submitted | approved | rejected
 
 
 class AgentStep(TypedDict):

@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { CveRecord, cveKey } from "@/lib/types";
+import { usePermission } from "@/lib/auth";
 
 const SEV: Record<string, { color: string; bg: string; label: string }> = {
   critical: { color: "var(--accent-red)",    bg: "var(--accent-red-bg)",         label: "C" },
@@ -10,10 +12,11 @@ const SEV: Record<string, { color: string; bg: string; label: string }> = {
 };
 
 const STATUS: Record<string, { icon: string; color: string }> = {
-  approved: { icon: "✓", color: "var(--accent-green)"  },
-  rejected: { icon: "✕", color: "var(--accent-red)"    },
-  pending:  { icon: "○", color: "var(--accent-yellow)"  },
-  queued:   { icon: "·", color: "var(--dim)"            },
+  approved:  { icon: "✓", color: "var(--accent-green)"  },
+  rejected:  { icon: "✕", color: "var(--accent-red)"    },
+  submitted: { icon: "➤", color: "var(--accent-blue)"   },
+  pending:   { icon: "○", color: "var(--accent-yellow)" },
+  queued:    { icon: "·", color: "var(--dim)"           },
 };
 
 interface Props {
@@ -24,10 +27,18 @@ interface Props {
 }
 
 export default function CveQueue({ cves, selectedId, onSelect }: Props) {
-  const approved = cves.filter((c) => c.status === "approved").length;
-  const rejected = cves.filter((c) => c.status === "rejected").length;
-  const done     = approved + rejected;
-  const pct      = cves.length > 0 ? Math.round((done / cves.length) * 100) : 0;
+  const canApproveSubmitted = usePermission("canApproveSubmitted");
+  // Cyber can narrow the queue to only findings awaiting their approval.
+  const [pendingApprovalOnly, setPendingApprovalOnly] = useState(false);
+
+  const approved  = cves.filter((c) => c.status === "approved").length;
+  const rejected  = cves.filter((c) => c.status === "rejected").length;
+  const submitted = cves.filter((c) => c.status === "submitted").length;
+  const pending   = cves.filter((c) => c.status === "pending" || c.status === "queued").length;
+  const done      = approved + rejected;
+  const pct       = cves.length > 0 ? Math.round((done / cves.length) * 100) : 0;
+
+  const visibleCves = pendingApprovalOnly ? cves.filter((c) => c.status === "submitted") : cves;
 
   // Group by severity for the filter chips
   const counts = cves.reduce<Record<string, number>>((acc, c) => {
@@ -88,9 +99,28 @@ export default function CveQueue({ cves, selectedId, onSelect }: Props) {
         </div>
       </div>
 
+      {/* ── Cyber: pending-my-approval filter ── */}
+      {canApproveSubmitted && submitted > 0 && (
+        <button
+          onClick={() => setPendingApprovalOnly((v) => !v)}
+          className="mx-3 mt-2 flex items-center gap-2 px-3 py-2 rounded-lg text-[11px] font-semibold transition-colors"
+          style={{
+            background: pendingApprovalOnly ? "var(--accent-blue-bg, rgba(68,147,248,0.12))" : "var(--surface2)",
+            color: pendingApprovalOnly ? "var(--accent-blue)" : "var(--muted)",
+            border: `1px solid ${pendingApprovalOnly ? "var(--accent-blue-bdr, rgba(68,147,248,0.25))" : "var(--border)"}`,
+          }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M22 2 11 13" /><path d="M22 2 15 22 11 13 2 9z" />
+          </svg>
+          Pending my approval
+          <span className="ml-auto font-mono">{submitted}</span>
+        </button>
+      )}
+
       {/* ── CVE List ── */}
       <div className="overflow-y-auto flex-1 min-h-0 py-1.5">
-        {cves.map((cve) => {
+        {visibleCves.map((cve) => {
           const key        = cveKey(cve);
           const isSelected = key === selectedId;
           const sev        = SEV[cve.severity]  ?? SEV.low;
@@ -152,13 +182,14 @@ export default function CveQueue({ cves, selectedId, onSelect }: Props) {
 
       {/* ── Footer ── */}
       <div
-        className="px-4 py-2.5 grid grid-cols-3 gap-1"
+        className="px-4 py-2.5 grid grid-cols-4 gap-1"
         style={{ borderTop: "1px solid var(--border)" }}
       >
         {[
-          { label: "Approved",  value: approved,           color: "var(--accent-green)"  },
-          { label: "Rejected",  value: rejected,           color: "var(--accent-red)"    },
-          { label: "Pending",   value: cves.length - done, color: "var(--accent-yellow)" },
+          { label: "Approved",  value: approved,  color: "var(--accent-green)"  },
+          { label: "Rejected",  value: rejected,  color: "var(--accent-red)"    },
+          { label: "Submitted", value: submitted, color: "var(--accent-blue)"   },
+          { label: "Pending",   value: pending,   color: "var(--accent-yellow)" },
         ].map((s) => (
           <div key={s.label} className="text-center">
             <div className="text-[14px] font-black leading-tight" style={{ color: s.color }}>

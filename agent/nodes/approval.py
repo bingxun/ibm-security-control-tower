@@ -24,13 +24,16 @@ def approval_node(state: AgentState) -> dict:
     steps = list(state.get("agent_steps", []))
     cves = [dict(c) for c in state["cves"]]
 
-    # Find next CVE that is pending (has a rationale, awaiting human decision)
-    pending = [i for i, c in enumerate(cves) if c["status"] == "pending"]
-    if not pending:
+    # Find the next CVE still awaiting a human — either `pending` (not yet
+    # submitted) or `submitted` (awaiting Cyber approval). Both must keep the
+    # gate open; otherwise, once every CVE is `submitted`, there'd be nothing to
+    # interrupt on and the router would loop here forever.
+    non_terminal = [i for i, c in enumerate(cves) if c["status"] in ("pending", "submitted")]
+    if not non_terminal:
         # Nothing left — route to persist
         return {"cves": cves, "agent_steps": steps}
 
-    current_idx = pending[0]
+    current_idx = non_terminal[0]
     current_cve = cves[current_idx]
 
     # Step id is scoped by position, not just the CVE id — the same CVE id can

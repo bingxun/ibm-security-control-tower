@@ -186,6 +186,8 @@ function ReviewContent({ runId }: { runId: string | null }) {
   const [runError, setRunError] = useState<string | null>(null);
   const [projectId, setProjectId] = useState<string>("");
   const [imageRef, setImageRef] = useState<string>("");
+  // DevOps notes are held locally per CVE and sent with that CVE's submit.
+  const [draftNotes, setDraftNotes] = useState<Record<string, string>>({});
   const logEndRef = useRef<HTMLDivElement>(null);
 
   const streamCleanup = useRef<(() => void) | null>(null);
@@ -287,10 +289,10 @@ function ReviewContent({ runId }: { runId: string | null }) {
     return () => { cancelled = true; cleanup(); clearInterval(pollInterval); };
   }, [runId]);
 
-  // ── Decision handler ──────────────────────────────────────────────────────
+  // ── Decision handler (approve / reject / submit-for-approval) ──────────────
   const handleDecision = useCallback(async (
     id: string,
-    decision: "approved" | "rejected",
+    decision: "approved" | "rejected" | "submitted",
     editedRationale?: string,
     pkg?: string,
     editedByRole?: string,
@@ -302,14 +304,23 @@ function ReviewContent({ runId }: { runId: string | null }) {
       setCves(prev => prev.map(c => (c.id === id && (pkg === undefined || c.pkg === pkg))
         ? { ...c, status: decision, manualNotes: editedRationale ?? c.manualNotes, edited: editedRationale ? true : c.edited, editedByRole: editedRationale ? editedByRole : c.editedByRole }
         : c));
-      showToast("Decision saved", "success");
+      showToast(decision === "submitted" ? "Submitted for approval" : "Decision saved", "success");
     } catch {
-      showToast("Decision was not saved. Check your project access and try again.", "error");
+      showToast(decision === "submitted" ? "Could not submit. Check your access and try again." : "Decision was not saved. Check your project access and try again.", "error");
     }
   }, [runId, showToast]);
 
+  // ── DevOps: save notes locally (sent with this CVE's submit) ───────────────
+  const handleSaveNotes = useCallback((key: string, notes: string) => {
+    setDraftNotes((prev) => ({ ...prev, [key]: notes }));
+  }, []);
+
   // ── Derived ───────────────────────────────────────────────────────────────
   const selectedCve = cves.find((c) => cveKey(c) === selectedId) ?? cves[0];
+  // Reflect any unsaved DevOps draft note on the selected CVE for display/editing.
+  const mergedSelectedCve = selectedCve
+    ? { ...selectedCve, manualNotes: draftNotes[cveKey(selectedCve)] ?? selectedCve.manualNotes }
+    : selectedCve;
   const reviewedCount = useMemo(
     () => cves.filter((c) => c.status === "approved" || c.status === "rejected").length,
     [cves]
@@ -429,15 +440,16 @@ function ReviewContent({ runId }: { runId: string | null }) {
               selectedId={selectedId}
               onSelect={setSelectedId}
             />
-            {selectedCve && (
+            {mergedSelectedCve && (
               <CveReview
-                cve={selectedCve}
+                cve={mergedSelectedCve}
                 agentSteps={agentSteps}
                 tokenFragment={tokenFragment}
                 totalCves={cves.length}
                 reviewedCount={reviewedCount}
                 approvedCount={liveStats.approved}
                 onDecision={handleDecision}
+                onSaveNotes={handleSaveNotes}
               />
             )}
             <ContextPanel stats={liveStats} cves={cves} />

@@ -11,16 +11,18 @@ const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
-  return sessionStorage.getItem("sct_token");
+  return sessionStorage.getItem("sct_token") ?? localStorage.getItem("sct_token");
 }
 
 export function setToken(token: string): void {
   sessionStorage.setItem("sct_token", token);
+  localStorage.setItem("sct_token", token);
   document.cookie = "sct_authed=1; path=/; SameSite=Strict";
 }
 
 export function clearToken(): void {
   sessionStorage.removeItem("sct_token");
+  localStorage.removeItem("sct_token");
   document.cookie = "sct_authed=; path=/; max-age=0; SameSite=Strict";
 }
 
@@ -99,7 +101,7 @@ export interface DashboardStats {
 
 export interface DecisionPayload {
   cve_id: string;
-  decision: "approved" | "rejected";
+  decision: "approved" | "rejected" | "submitted";
   edited_rationale?: string;
   pkg?: string;
   edited_by_role?: string;
@@ -177,7 +179,7 @@ export async function getRun(runId: string): Promise<ScanRun> {
   return get(`/run/${runId}`);
 }
 
-/** Submit a human decision for a CVE in the given run. */
+/** Submit a human decision for a CVE in the given run (approve/reject/submit). */
 export async function submitDecision(
   runId: string,
   payload: DecisionPayload

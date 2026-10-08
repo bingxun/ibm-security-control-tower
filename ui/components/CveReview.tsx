@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CveRecord } from "@/lib/types";
+import { CveRecord, cveKey } from "@/lib/types";
 import { AgentStep } from "@/lib/types";
 import AgentDrawer from "./AgentDrawer";
 import { usePermission, useAuth } from "@/lib/auth";
@@ -14,7 +14,9 @@ interface Props {
   totalCves: number;
   reviewedCount: number;
   approvedCount: number;
-  onDecision: (id: string, decision: "approved" | "rejected", editedRationale?: string, pkg?: string, editedByRole?: string) => void;
+  onDecision: (id: string, decision: "approved" | "rejected" | "submitted", editedRationale?: string, pkg?: string, editedByRole?: string) => void;
+  /** DevOps: save a note locally for this CVE (sent with its submit). */
+  onSaveNotes?: (cveKey: string, notes: string) => void;
 }
 
 const SEV_COLOR: Record<string, string> = {
@@ -56,10 +58,13 @@ function EditModal({
   cve,
   onCancel,
   onAccept,
+  notesOnly = false,
 }: {
   cve: CveRecord;
   onCancel: () => void;
   onAccept: (notes: string) => void;
+  /** When true, the modal only saves notes (no approval) — used by DevOps. */
+  notesOnly?: boolean;
 }) {
   const [draft, setDraft] = useState(cve.manualNotes ?? "");
 
@@ -144,7 +149,7 @@ function EditModal({
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <polyline points="20 6 9 17 4 12" />
             </svg>
-            Save notes & accept
+            {notesOnly ? "Save notes" : "Save notes & accept"}
           </button>
           <button
             onClick={onCancel}
@@ -172,11 +177,18 @@ export default function CveReview({
   reviewedCount,
   approvedCount,
   onDecision,
+  onSaveNotes,
 }: Props) {
   const [editOpen, setEditOpen] = useState(false);
-  const canApprove  = usePermission("canApprove");
-  const canReject   = usePermission("canReject");
+  const canApprove            = usePermission("canApprove");
+  const canReject             = usePermission("canReject");
+  const canSubmitForApproval  = usePermission("canSubmitForApproval");
+  const canApproveSubmitted   = usePermission("canApproveSubmitted");
   const { user }    = useAuth();
+
+  const isSubmitted = cve.status === "submitted";
+  // DevOps uses the notes-only modal; it has no approve capability of its own.
+  const notesOnly = canSubmitForApproval && !canApprove;
 
   const sevColor = SEV_COLOR[cve.severity] ?? "var(--faint)";
   const cvssColor =
@@ -212,10 +224,16 @@ export default function CveReview({
       {editOpen && (
         <EditModal
           cve={cve}
+          notesOnly={notesOnly}
           onCancel={() => setEditOpen(false)}
           onAccept={(notes) => {
             setEditOpen(false);
-            onDecision(cve.id, "approved", notes, cve.pkg, user?.roles?.[0]);
+            if (notesOnly) {
+              // DevOps: persist the note locally; submission happens via "Submit all".
+              onSaveNotes?.(cveKey(cve), notes);
+            } else {
+              onDecision(cve.id, "approved", notes, cve.pkg, user?.roles?.[0]);
+            }
           }}
         />
       )}
@@ -477,7 +495,94 @@ export default function CveReview({
             className="flex items-center gap-3 px-6 py-5"
             style={{ borderTop: "1px solid var(--border)", background: "var(--surface3)" }}
           >
-            {canReject ? (
+            {isSubmitted && canApproveSubmitted ? (
+              <>
+                {/* Cyber — Approve a finding DevOps submitted upward */}
+                <button
+                  onClick={() => onDecision(cve.id, "approved", undefined, cve.pkg)}
+                  className="flex items-center gap-2 px-8 py-3 rounded-xl text-[14px] font-bold transition-all duration-150 hover:opacity-90 active:scale-[0.98]"
+                  style={{ background: "var(--btn-accept-bg)", color: "var(--btn-accept-text)", boxShadow: "0 0 20px var(--btn-accept-glow)" }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                  Approve
+                </button>
+
+                {/* Add Notes (saves + approves) */}
+                <button
+                  onClick={() => setEditOpen(true)}
+                  className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all duration-150 hover:opacity-80"
+                  style={{ background: "var(--surface2)", color: "var(--faint)", border: "1px solid var(--border2)" }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                  </svg>
+                  Add Notes
+                </button>
+
+                {/* Reject */}
+                <button
+                  onClick={() => onDecision(cve.id, "rejected", undefined, cve.pkg)}
+                  className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all duration-150 hover:opacity-80"
+                  style={{ background: "var(--accent-red-bg)", color: "var(--accent-red)", border: "1px solid var(--accent-red-bdr)" }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                  Reject
+                </button>
+              </>
+            ) : isSubmitted ? (
+              /* Submitted, but this role can't approve it — strict Cyber-only lockout */
+              <div
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px]"
+                style={{ background: "var(--accent-blue-bg, rgba(68,147,248,0.08))", border: "1px solid var(--accent-blue-bdr, rgba(68,147,248,0.25))", color: "var(--accent-blue)" }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M22 2 11 13" /><path d="M22 2 15 22 11 13 2 9z" />
+                </svg>
+                Submitted — awaiting Cyber Manager approval.
+              </div>
+            ) : notesOnly ? (
+              cve.status === "pending" ? (
+                <>
+                  {/* DevOps — submit THIS finding for Cyber approval (with any note) */}
+                  <button
+                    onClick={() => onDecision(cve.id, "submitted", cve.manualNotes?.trim() ? cve.manualNotes : undefined, cve.pkg, user?.roles?.[0])}
+                    className="flex items-center gap-2 px-8 py-3 rounded-xl text-[14px] font-bold transition-all duration-150 hover:opacity-90 active:scale-[0.98]"
+                    style={{ background: "var(--btn-accept-bg)", color: "var(--btn-accept-text)", boxShadow: "0 0 20px var(--btn-accept-glow)" }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <path d="M22 2 11 13" /><path d="M22 2 15 22 11 13 2 9z" />
+                    </svg>
+                    Submit for Approval
+                  </button>
+
+                  {/* Add Notes (local, sent with this submit) */}
+                  <button
+                    onClick={() => setEditOpen(true)}
+                    className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all duration-150 hover:opacity-80"
+                    style={{ background: "var(--surface2)", color: "var(--faint)", border: "1px solid var(--border2)" }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                    Add Notes
+                  </button>
+                </>
+              ) : (
+                /* DevOps viewing an already-decided finding */
+                <div
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px]"
+                  style={{ background: "var(--surface2)", border: "1px solid var(--border2)", color: "var(--muted)" }}
+                >
+                  This finding has already been {cve.status}. No action needed.
+                </div>
+              )
+            ) : canReject ? (
               <>
                 {/* Primary — Accept */}
                 <button

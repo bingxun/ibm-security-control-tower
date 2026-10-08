@@ -22,9 +22,13 @@ from agent.nodes.persist import persist_node
 # ── Routing logic ──────────────────────────────────────────────────────────────
 
 def _route_after_approval(state: AgentState) -> Literal["approval", "persist"]:
-    """Loop back to approval if there are still pending CVEs; otherwise persist."""
-    pending = [c for c in state["cves"] if c["status"] == "pending"]
-    return "approval" if pending else "persist"
+    """Loop back to approval while any CVE is still non-terminal; otherwise persist.
+
+    Non-terminal = awaiting a human: `pending` (not yet submitted) or `submitted`
+    (awaiting Cyber approval). Persist runs only once every CVE is approved/rejected.
+    """
+    non_terminal = [c for c in state["cves"] if c["status"] in ("pending", "submitted")]
+    return "approval" if non_terminal else "persist"
 
 
 # ── Build the graph ────────────────────────────────────────────────────────────
@@ -53,11 +57,12 @@ def build_graph(checkpointer=None) -> StateGraph:
 
 
 def make_initial_state(
-    trivy_json: dict,
+    scan_json: dict,
     image_ref: str = "",
     project_id: str = "",
     cis_profile: str = "CIS Level 1",
     severity_threshold: str = "high",
+    scanner: str = "trivy",
     run_id: str | None = None,
 ) -> AgentState:
     return AgentState(
@@ -66,7 +71,8 @@ def make_initial_state(
         project_id=project_id,
         cis_profile=cis_profile,
         severity_threshold=severity_threshold,
-        trivy_json=trivy_json,
+        scanner=scanner,
+        scan_json=scan_json,
         cves=[],
         current_cve_index=0,
         agent_steps=[],
