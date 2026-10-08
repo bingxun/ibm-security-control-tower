@@ -417,6 +417,13 @@ export async function downloadProjectReport(projectId: string, template = false)
 export function importProjectReport(projectId: string, content: string): Promise<{ updated: number; unchanged: number }> {
   return userRequest(`/projects/${encodeURIComponent(projectId)}/report`, "POST", { content });
 }
+// ── LLM gateway settings (Claude / IBM RAD) ──────────────────────────────────
+export interface LlmConfig { base_url: string; model: string; token_set: boolean; token_hint: string; }
+export interface LlmConfigInput { base_url: string; model: string; token?: string }
+export function getLlmConfig(): Promise<LlmConfig> { return userRequest("/settings/llm"); }
+export function testLlmConfig(body: LlmConfigInput): Promise<{ ok: boolean; detail: string }> { return userRequest("/settings/llm/test", "POST", body); }
+export function saveLlmConfig(body: LlmConfigInput): Promise<LlmConfig> { return userRequest("/settings/llm", "PUT", body); }
+
 export interface SharedBaseline { id: string; cve_id: string; pkg: string; rationale: string; remediation: string; approver: string; published_at: string; }
 export function listBaselines(): Promise<SharedBaseline[]> { return userRequest("/baselines"); }
 export function publishBaseline(runId: string, cve_id: string, pkg: string, justification: string, remediation: string): Promise<{ id: string }> {

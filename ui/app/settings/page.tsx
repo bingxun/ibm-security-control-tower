@@ -1,15 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import TopNav from "@/components/TopNav";
 import RequireAuth from "@/components/RequireAuth";
 import ProjectsSettings from "@/components/ProjectsSettings";
 import UsersSettings from "@/components/UsersSettings";
 import { usePermission } from "@/lib/auth";
+import { getLlmConfig, testLlmConfig, saveLlmConfig } from "@/lib/api";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type Section = "projects" | "watsonx" | "rag" | "users" | "scanner" | "notifications" | "danger";
+type Section = "projects" | "claude" | "rag" | "users" | "scanner" | "notifications" | "danger";
 
 // ── Shared micro-components ────────────────────────────────────────────────
 
@@ -223,12 +224,12 @@ function SaveButton({ onClick, saved }: { onClick: () => void; saved: boolean })
 const NAV_ITEMS: { id: Section; label: string; icon: React.ReactNode }[] = [
   { id: "projects", label: "Projects", icon: <span aria-hidden="true">▦</span> },
   {
-    id: "watsonx",
-    label: "watsonx.ai",
+    id: "claude",
+    label: "Claude Gateway",
     icon: (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z" />
-        <path d="M12 8v4l3 3" />
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4" />
+        <circle cx="12" cy="12" r="3.5" />
       </svg>
     ),
   },
@@ -281,141 +282,88 @@ const NAV_ITEMS: { id: Section; label: string; icon: React.ReactNode }[] = [
 
 // ── Section renderers ──────────────────────────────────────────────────────
 
-function WatsonxSection() {
-  const [cfg, setCfg] = useState({
-    apiKey: "",
-    projectId: "58098c39-0bb6-4ac6-abaa-2cdb451c33cd",
-    url: "https://jp-tok.ml.cloud.ibm.com",
-    model: "ibm/granite-13b-instruct-v2",
-    embedModel: "ibm/slate-125m-english-rtrvr",
-    maxTokens: "256",
-    temperature: "0.3",
-  });
+function ClaudeSection() {
+  const [cfg, setCfg] = useState({ base_url: "", model: "", token: "" });
+  const [hint, setHint] = useState("");
+  const [tokenSet, setTokenSet] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState("");
   const [saved, setSaved] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<null | "ok" | "fail">(null);
-  const set = (k: keyof typeof cfg) => (v: string) => {
-    setCfg((p) => ({ ...p, [k]: v }));
-    setSaved(false);
-    setTestResult(null);
-  };
+  const [testResult, setTestResult] = useState<null | { ok: boolean; detail: string }>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getLlmConfig()
+      .then((c) => { if (!cancelled) { setCfg({ base_url: c.base_url, model: c.model, token: "" }); setHint(c.token_hint); setTokenSet(c.token_set); } })
+      .catch((e) => { if (!cancelled) setLoadErr(e.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const set = (k: keyof typeof cfg) => (v: string) => { setCfg((p) => ({ ...p, [k]: v })); setSaved(false); setTestResult(null); };
+  const body = () => ({ base_url: cfg.base_url, model: cfg.model, ...(cfg.token.trim() ? { token: cfg.token.trim() } : {}) });
 
   const handleTest = async () => {
-    setTesting(true);
-    setTestResult(null);
-    await new Promise((r) => setTimeout(r, 1400));
-    setTesting(false);
-    setTestResult(cfg.apiKey.length > 10 ? "ok" : "fail");
+    setTesting(true); setTestResult(null);
+    try { setTestResult(await testLlmConfig(body())); }
+    catch (e) { setTestResult({ ok: false, detail: e instanceof Error ? e.message : "Test failed" }); }
+    finally { setTesting(false); }
+  };
+  const handleSave = async () => {
+    try { const c = await saveLlmConfig(body()); setHint(c.token_hint); setTokenSet(c.token_set); setCfg((p) => ({ ...p, token: "" })); setSaved(true); }
+    catch (e) { setLoadErr(e instanceof Error ? e.message : "Save failed"); }
   };
 
   return (
     <SectionCard
-      title="watsonx.ai"
-      subtitle="IBM Granite LLM and slate embedding model credentials"
+      title="Claude Gateway"
+      subtitle="Anthropic-compatible LLM gateway (IBM RAD) powering synthesis, Review AI, and the assistant"
       icon={
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-blue)" strokeWidth="2">
-          <path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z" /><path d="M12 8v4l3 3" />
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--brand-2)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4" /><circle cx="12" cy="12" r="3.5" />
         </svg>
       }
     >
-      <FieldRow label="API Key" hint="IBM Cloud API key with WML Editor role">
-        <SecretInput value={cfg.apiKey} onChange={set("apiKey")} placeholder="Enter IBM Cloud API key…" />
+      {loadErr && (
+        <div className="px-4 py-2.5 rounded-xl text-[12px]" style={{ background: "var(--accent-red-bg)", border: "1px solid var(--accent-red-bdr)", color: "var(--accent-red)" }}>{loadErr}</div>
+      )}
+
+      <FieldRow label="Base URL" hint="Anthropic-compatible endpoint (e.g. https://llm.ibm-rad.com)">
+        <TextInput value={cfg.base_url} onChange={set("base_url")} placeholder={loading ? "Loading…" : "https://llm.ibm-rad.com"} mono />
       </FieldRow>
 
-      <FieldRow label="Project ID" hint="watsonx.ai project GUID">
-        <TextInput value={cfg.projectId} onChange={set("projectId")} mono />
+      <FieldRow label="Model" hint="Served model id (e.g. global.anthropic.claude-sonnet-4-6)">
+        <TextInput value={cfg.model} onChange={set("model")} placeholder={loading ? "Loading…" : "global.anthropic.claude-sonnet-4-6"} mono />
       </FieldRow>
 
-      <FieldRow label="Regional URL" hint="watsonx.ai endpoint">
-        <SelectInput
-          value={cfg.url}
-          onChange={set("url")}
-          options={[
-            { value: "https://jp-tok.ml.cloud.ibm.com", label: "Asia Pacific — Tokyo (jp-tok)" },
-            { value: "https://us-south.ml.cloud.ibm.com", label: "US South — Dallas (us-south)" },
-            { value: "https://eu-de.ml.cloud.ibm.com", label: "EU — Frankfurt (eu-de)" },
-            { value: "https://au-syd.ml.cloud.ibm.com", label: "Asia Pacific — Sydney (au-syd)" },
-          ]}
-        />
+      <FieldRow label="API token" hint={tokenSet ? "A token is configured — enter a new one to replace it, or leave blank to keep it" : "Gateway API token (sk-…)"}>
+        <SecretInput value={cfg.token} onChange={set("token")} placeholder={tokenSet ? `Configured · ${hint} — leave blank to keep` : "Enter gateway token…"} />
       </FieldRow>
 
-      <div
-        className="h-px w-full"
-        style={{ background: "var(--border)" }}
-      />
-
-      <FieldRow label="Generation model" hint="Granite model for rationale synthesis">
-        <SelectInput
-          value={cfg.model}
-          onChange={set("model")}
-          options={[
-            { value: "ibm/granite-13b-instruct-v2", label: "Granite 13B Instruct v2" },
-            { value: "ibm/granite-3-8b-instruct", label: "Granite 3 8B Instruct" },
-            { value: "ibm/granite-20b-multilingual", label: "Granite 20B Multilingual" },
-          ]}
-        />
-      </FieldRow>
-
-      <FieldRow label="Embedding model" hint="Slate model for RAG vector encoding">
-        <SelectInput
-          value={cfg.embedModel}
-          onChange={set("embedModel")}
-          options={[
-            { value: "ibm/slate-125m-english-rtrvr", label: "Slate 125M English" },
-            { value: "ibm/slate-30m-english-rtrvr", label: "Slate 30M English (faster)" },
-          ]}
-        />
-      </FieldRow>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <FieldRow label="Max tokens" hint="Per-CVE generation cap">
-          <TextInput value={cfg.maxTokens} onChange={set("maxTokens")} />
-        </FieldRow>
-        <FieldRow label="Temperature">
-          <TextInput value={cfg.temperature} onChange={set("temperature")} />
-        </FieldRow>
-      </div>
-
-      {/* Connection test */}
-      <div
-        className="flex items-center gap-3 px-4 py-3 rounded-xl"
-        style={{ background: "var(--surface2)", border: "1px solid var(--border)" }}
-      >
+      {/* Live connection test */}
+      <div className="flex items-center gap-3 px-4 py-3 rounded-xl flex-wrap" style={{ background: "var(--surface2)", border: "1px solid var(--border)" }}>
         <button
           onClick={handleTest}
-          disabled={testing}
+          disabled={testing || loading}
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-[12px] font-semibold transition-opacity hover:opacity-80"
-          style={{
-            background: "var(--accent-blue-bg)",
-            color: "var(--accent-blue)",
-            border: "1px solid rgba(68,147,248,0.25)",
-            opacity: testing ? 0.6 : 1,
-          }}
+          style={{ background: "var(--accent-blue-bg)", color: "var(--accent-blue)", border: "1px solid var(--accent-blue-bdr)", opacity: testing ? 0.6 : 1 }}
         >
           {testing ? (
-            <>
-              <svg className="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-              </svg>
-              Testing…
-            </>
+            <><svg className="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>Testing…</>
           ) : "Test connection"}
         </button>
-        {testResult === "ok" && (
-          <span className="text-[12px] flex items-center gap-1.5" style={{ color: "var(--accent-green)" }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
-            Connection successful
-          </span>
-        )}
-        {testResult === "fail" && (
-          <span className="text-[12px] flex items-center gap-1.5" style={{ color: "var(--accent-red)" }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
-            Failed — check API key and project association
+        {testResult && (
+          <span className="text-[12px] flex items-center gap-1.5 min-w-0" style={{ color: testResult.ok ? "var(--accent-green)" : "var(--accent-red)" }}>
+            {testResult.ok
+              ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
+              : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>}
+            <span className="truncate">{testResult.detail}</span>
           </span>
         )}
       </div>
 
-      <SaveButton onClick={() => setSaved(true)} saved={saved} />
+      <SaveButton onClick={handleSave} saved={saved} />
     </SectionCard>
   );
 }
@@ -774,7 +722,7 @@ function DangerSection() {
 
 const SECTION_COMPONENTS: Record<Section, React.ComponentType> = {
   projects: ProjectsSettings,
-  watsonx: WatsonxSection,
+  claude: ClaudeSection,
   rag: RagSection,
   users: UsersSettings,
   scanner: ScannerSection,
@@ -803,7 +751,7 @@ function SettingsPageInner() {
           >
             Settings
           </p>
-          {NAV_ITEMS.filter((item) => item.id !== "users" || canManageUsers).map((item) => {
+          {NAV_ITEMS.filter((item) => (item.id !== "users" && item.id !== "claude") || canManageUsers).map((item) => {
             const isActive = active === item.id;
             const isDanger = item.id === "danger";
             return (

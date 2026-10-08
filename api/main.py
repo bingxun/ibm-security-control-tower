@@ -69,6 +69,8 @@ from db import baselines
 from db.database import get_conn
 from agent import review_assist
 from agent import assistant
+from agent.nodes import synthesis
+from pathlib import Path
 
 GRAPH = build_graph()
 
@@ -921,6 +923,88 @@ def apply_baselines(run_id: str, user: dict = Depends(require_auth)):
         if changes:
             _write_reviews(changes, agent_user)
     return {"applied": len(changes)}
+
+
+# ── LLM gateway settings (Claude / IBM RAD, Anthropic-compatible) ─────────────
+class LlmConfigRequest(BaseModel):
+    base_url: str = Field(min_length=4, max_length=300)
+    model: str = Field(min_length=1, max_length=120)
+    token: Optional[str] = None  # new token; blank/omitted keeps the existing one
+
+
+def _token_hint(tok: str) -> str:
+    if not tok:
+        return ""
+    return f"{tok[:5]}…{tok[-4:]}" if len(tok) > 12 else "set"
+
+
+def _llm_payload() -> dict:
+    tok = synthesis.RAD_AUTH_TOKEN
+    return {"base_url": synthesis.RAD_BASE_URL, "model": synthesis.RAD_MODEL,
+            "token_set": bool(tok), "token_hint": _token_hint(tok)}
+
+
+def _probe_gateway(base_url: str, model: str, token: str) -> tuple[bool, str]:
+    """Live check against the Anthropic-compatible gateway; returns (ok, detail)."""
+    import json as _json, urllib.request, urllib.error
+    if not token:
+        return False, "No API token configured."
+    url = base_url.rstrip("/") + "/v1/chat/completions"
+    body = _json.dumps({"model": model, "max_tokens": 8,
+                        "messages": [{"role": "user", "content": "ping"}]}).encode()
+    req = urllib.request.Request(url, data=body, method="POST",
+                                 headers={"Content-Type": "application/json", "x-api-key": token})
+    try:
+        with urllib.request.urlopen(req, timeout=20):
+            return True, "Connection successful."
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", "replace")[:200]
+        msg = {401: "Invalid API token.", 403: "Forbidden — check the base URL and token.",
+               404: "Model or endpoint not found — check the model id.",
+               429: "Rate limited or budget exceeded for this token's team."}.get(e.code, f"HTTP {e.code}.")
+        return False, f"{msg} ({raw})"
+    except Exception as e:  # network / DNS / timeout
+        return False, f"Could not reach the gateway: {type(e).__name__}."
+
+
+def _write_env(updates: dict[str, str]) -> None:
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    lines = env_path.read_text().splitlines() if env_path.exists() else []
+    seen, out = set(), []
+    for line in lines:
+        m = re.match(r"^([A-Z0-9_]+)=", line)
+        if m and m.group(1) in updates:
+            out.append(f"{m.group(1)}={updates[m.group(1)]}"); seen.add(m.group(1))
+        else:
+            out.append(line)
+    for k, v in updates.items():
+        if k not in seen:
+            out.append(f"{k}={v}")
+    env_path.write_text("\n".join(out) + "\n")
+
+
+@app.get("/settings/llm")
+def get_llm(user: dict = Depends(require_super_admin)):
+    return _llm_payload()
+
+
+@app.post("/settings/llm/test")
+def test_llm(req: LlmConfigRequest, user: dict = Depends(require_super_admin)):
+    token = req.token.strip() if (req.token and "…" not in req.token) else synthesis.RAD_AUTH_TOKEN
+    ok, detail = _probe_gateway(req.base_url.strip(), req.model.strip(), token)
+    return {"ok": ok, "detail": detail}
+
+
+@app.put("/settings/llm")
+def set_llm(req: LlmConfigRequest, user: dict = Depends(require_super_admin)):
+    synthesis.RAD_BASE_URL = req.base_url.strip()
+    synthesis.RAD_MODEL = req.model.strip()
+    env = {"ANTHROPIC_BASE_URL": synthesis.RAD_BASE_URL, "RAD_MODEL": synthesis.RAD_MODEL}
+    if req.token and req.token.strip() and "…" not in req.token:
+        synthesis.RAD_AUTH_TOKEN = req.token.strip()
+        env["ANTHROPIC_AUTH_TOKEN"] = synthesis.RAD_AUTH_TOKEN
+    _write_env(env)  # persist so it survives a restart (.env is authoritative)
+    return _llm_payload()
 
 
 class CsvImportRequest(BaseModel):
