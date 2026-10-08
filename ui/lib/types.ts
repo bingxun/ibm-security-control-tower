@@ -41,9 +41,10 @@ export const ROLE_PERMISSIONS: Record<UserRole, RolePermissions> = {
   ADMIN:           { canScan: true,  canApprove: true,  canReject: false, canViewSettings: true,  canManageUsers: false, canManageProjects: false },
   DEVOPS_ENGINEER: { canScan: true,  canApprove: false, canReject: false, canViewSettings: false, canManageUsers: false, canManageProjects: false },
   CYBER_MANAGER:   { canScan: false, canApprove: true,  canReject: true,  canViewSettings: true,  canManageUsers: false, canManageProjects: false },
-  // DSO Manager is a reviewer-like approver: it can act on findings (submit) and
-  // view settings, but not reject, scan, or administer users/projects.
-  DSO_MANAGER:     { canScan: false, canApprove: true,  canReject: false, canViewSettings: true,  canManageUsers: false, canManageProjects: false },
+  // DSO Manager is a normal admin PLUS project administration: it can scan,
+  // approve (submit, not reject), view settings, and manage projects (create,
+  // see all, assign members) — but cannot manage users/roles.
+  DSO_MANAGER:     { canScan: true,  canApprove: true,  canReject: false, canViewSettings: true,  canManageUsers: false, canManageProjects: true  },
 };
 
 export const ROLE_LABELS: Record<UserRole, string> = {

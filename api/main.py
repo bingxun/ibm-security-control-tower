@@ -550,9 +550,12 @@ def require_auth(
 
 
 # Capability → the set of roles that grants it. A user needs ANY one of them.
-SCANNER_ROLES  = {"SUPER_ADMIN", "ADMIN", "DEVOPS_ENGINEER"}
-REVIEWER_ROLES = {"SUPER_ADMIN", "ADMIN", "CYBER_MANAGER", "DSO_MANAGER"}
-REJECTER_ROLES = {"SUPER_ADMIN", "CYBER_MANAGER"}
+SCANNER_ROLES         = {"SUPER_ADMIN", "ADMIN", "DEVOPS_ENGINEER", "DSO_MANAGER"}
+REVIEWER_ROLES        = {"SUPER_ADMIN", "ADMIN", "CYBER_MANAGER", "DSO_MANAGER"}
+REJECTER_ROLES        = {"SUPER_ADMIN", "CYBER_MANAGER"}
+# Roles that administer projects (create, see all, assign members) and may read
+# the user list to pick assignees. Super admins additionally manage users/roles.
+PROJECT_MANAGER_ROLES = {"SUPER_ADMIN", "DSO_MANAGER"}
 
 
 def _roles(user: dict) -> set[str]:
@@ -560,9 +563,16 @@ def _roles(user: dict) -> set[str]:
 
 
 def require_super_admin(current_user: dict = Depends(require_auth)) -> dict:
-    """Dependency: only super admins administer global users and projects."""
+    """Dependency: only super admins administer global users and roles."""
     if "SUPER_ADMIN" not in _roles(current_user):
         raise HTTPException(status_code=403, detail="Super admin access required")
+    return current_user
+
+
+def require_project_manager(current_user: dict = Depends(require_auth)) -> dict:
+    """Dependency: super admins and DSO managers administer projects + memberships."""
+    if not (_roles(current_user) & PROJECT_MANAGER_ROLES):
+        raise HTTPException(status_code=403, detail="Project management access required")
     return current_user
 
 
@@ -582,7 +592,7 @@ def accessible_projects(user: dict, project_id: str | None = None) -> list[str] 
     if project_id is not None:
         check_project(user, project_id)
         return [project_id]
-    return None if "SUPER_ADMIN" in _roles(user) else [p["id"] for p in list_projects(user)]
+    return None if (_roles(user) & PROJECT_MANAGER_ROLES) else [p["id"] for p in list_projects(user)]
 
 
 def check_project(user: dict, project_id: str) -> None:
@@ -1059,7 +1069,9 @@ def auth_me(current_user: dict = Depends(require_auth)):
 # ── User management routes (SUPER_ADMIN only) ────────────────────────────────────
 
 @app.get("/users")
-def users_list(_admin: dict = Depends(require_super_admin)):
+def users_list(_pm: dict = Depends(require_project_manager)):
+    # Project managers (incl. DSO) read the list to assign members; only super
+    # admins can create/update/delete users (see routes below).
     return [_safe_user(u) for u in list_users()]
 
 
@@ -1123,7 +1135,7 @@ def projects_list(user: dict = Depends(require_auth)):
 
 
 @app.post("/projects", status_code=201)
-def projects_create(req: CreateProjectRequest, user: dict = Depends(require_super_admin)):
+def projects_create(req: CreateProjectRequest, user: dict = Depends(require_project_manager)):
     if not req.name.strip():
         raise HTTPException(status_code=422, detail="Project name is required")
     return create_project(req.name.strip(), req.description.strip())
@@ -1136,13 +1148,13 @@ def projects_get(project_id: str, user: dict = Depends(require_auth)):
 
 
 @app.get("/projects/{project_id}/members")
-def projects_members(project_id: str, user: dict = Depends(require_super_admin)):
+def projects_members(project_id: str, user: dict = Depends(require_project_manager)):
     check_project(user, project_id)
     return {"user_ids": project_member_ids(project_id)}
 
 
 @app.put("/projects/{project_id}/members")
-def projects_members_update(project_id: str, req: ProjectMembersRequest, user: dict = Depends(require_super_admin)):
+def projects_members_update(project_id: str, req: ProjectMembersRequest, user: dict = Depends(require_project_manager)):
     check_project(user, project_id)
     try:
         set_project_members(project_id, req.user_ids)

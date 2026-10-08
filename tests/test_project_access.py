@@ -187,6 +187,28 @@ class ProjectAccessTests(unittest.TestCase):
         by_pkg = {r['pkg']: r['status'] for r in db.get_cves('dup-run') if r['id'] == 'CVE-dup'}
         self.assertEqual(by_pkg, {'musl': 'approved', 'musl-utils': 'pending'})
 
+    def test_dso_manager_administers_projects_but_not_users(self):
+        # DSO Manager = admin + project administration: can create projects, see
+        # all projects, read the user list, and assign members — but cannot
+        # create/modify users or reject findings.
+        dso = db.create_user('dso@example.com', 'DSO', 'Test-only-123', ['DSO_MANAGER'])
+        headers = self.login('dso@example.com', 'Test-only-123')
+        # Sees ALL projects (like a super admin), not just assigned ones.
+        self.assertEqual(len(self.client.get('/projects', headers=headers).json()), 2)
+        # Can create a project and assign a member.
+        pid = self.client.post('/projects', headers=headers, json={'name': 'DSO-made'}).json()['id']
+        self.assertEqual(self.client.get('/users', headers=headers).status_code, 200)
+        admin_id = self.users['ADMIN'][0]['id']
+        self.assertEqual(self.client.put(f'/projects/{pid}/members', headers=headers,
+            json={'user_ids': [admin_id]}).status_code, 200)
+        # Still cannot administer users.
+        self.assertEqual(self.client.post('/users', headers=headers,
+            json={'email': 'x@example.com', 'name': 'X', 'password': 'Test-only-123', 'roles': ['ADMIN']}).status_code, 403)
+        # Is a scanner too (admin-like): can start a scan in any project.
+        with patch('api.main._run_pipeline', new=AsyncMock()):
+            self.assertEqual(self.client.post('/scan', headers=headers,
+                json={'projectId': self.a, 'imageRef': 'nginx'}).status_code, 200)
+
     def test_migration_is_idempotent_and_does_not_assign_users(self):
         # Demote the bootstrap super admin, then let the one-time migration re-promote it.
         with db.get_conn() as conn:

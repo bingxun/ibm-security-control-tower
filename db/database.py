@@ -710,7 +710,7 @@ def migrate_multi_role() -> None:
 
 def list_projects(user: dict) -> list[dict]:
     with get_conn() as conn:
-        if "SUPER_ADMIN" in user.get("roles", [user.get("role")]):
+        if set(user.get("roles") or [user.get("role")]) & {"SUPER_ADMIN", "DSO_MANAGER"}:
             rows = conn.execute("SELECT * FROM projects ORDER BY name, id").fetchall()
         else:
             rows = conn.execute("""SELECT p.* FROM projects p JOIN project_members m ON p.id=m.project_id
@@ -726,7 +726,7 @@ def get_project(project_id: str) -> dict | None:
 
 def has_project_access(user: dict, project_id: str) -> bool:
     with get_conn() as conn:
-        if "SUPER_ADMIN" in user.get("roles", [user.get("role")]):
+        if set(user.get("roles") or [user.get("role")]) & {"SUPER_ADMIN", "DSO_MANAGER"}:
             return conn.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone() is not None
         return conn.execute("SELECT 1 FROM project_members WHERE project_id=? AND user_id=?", (project_id, user["id"])).fetchone() is not None
 
