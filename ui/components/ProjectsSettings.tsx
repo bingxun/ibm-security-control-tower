@@ -21,7 +21,7 @@ function MembershipEditor({ project }: { project: Project }) {
   useEffect(() => {
     let cancelled = false;
     Promise.all([listUsers(), getProjectMembers(project.id)]).then(([accounts, members]) => {
-      if (!cancelled) { setUsers(accounts.filter(u => u.role !== "SUPER_ADMIN")); setSelected(members.user_ids); }
+      if (!cancelled) { setUsers(accounts.filter(u => !u.roles.includes("SUPER_ADMIN"))); setSelected(members.user_ids); }
     }).catch(e => { if (!cancelled) setError(e.message); }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [project.id, retry]);
@@ -43,7 +43,7 @@ function MembershipEditor({ project }: { project: Project }) {
         <fieldset disabled={busy} className="max-h-72 overflow-y-auto space-y-2">
           {users.map(u => <label key={u.id} className="flex items-center gap-3 rounded-lg bg-[var(--surface2)] p-3">
             <input type="checkbox" className="h-4 w-4 accent-[var(--accent-blue)]" checked={selected.includes(u.id)} onChange={e => { setSaved(false); setSelected(ids => e.target.checked ? [...ids, u.id] : ids.filter(id => id !== u.id)); }} />
-            <span className="min-w-0"><span className="block text-sm">{u.name} · {ROLE_LABELS[u.role]}{!u.is_active && " (inactive)"}</span><span className="block break-all text-xs text-[var(--faint)]">{u.email}</span></span>
+            <span className="min-w-0"><span className="block text-sm">{u.name} · {u.roles.map(r => ROLE_LABELS[r]).join(", ")}{!u.is_active && " (inactive)"}</span><span className="block break-all text-xs text-[var(--faint)]">{u.email}</span></span>
           </label>)}
           {users.length === 0 && <p className="text-sm">Create an account in Users &amp; Roles first.</p>}
         </fieldset>

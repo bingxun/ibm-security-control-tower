@@ -24,7 +24,7 @@ class ProjectAccessTests(unittest.TestCase):
         self.users = {}
         for role in ['ADMIN', 'DEVOPS_ENGINEER', 'CYBER_MANAGER']:
             email = role.lower() + '@example.com'
-            user = db.create_user(email, role, 'Test-only-123', role)
+            user = db.create_user(email, role, 'Test-only-123', [role])
             self.users[role] = (user, self.login(email, 'Test-only-123'))
         db.set_project_members(self.a, [u['id'] for u, _ in self.users.values()])
         for project, run in [(self.a, 'run-a'), (self.b, 'run-b')]:
@@ -168,17 +168,37 @@ class ProjectAccessTests(unittest.TestCase):
             persist_decision_tool('CVE-test', self.a, 'high', 'rationale', 'forged', 'approved', session_token=token)
         self.assertEqual(memory_stats_tool(session_token=token), {'total_decisions': 0})
 
+    def _set_roles(self, email, roles):
+        admin = db.get_user_by_email(email)
+        with db.get_conn() as conn:
+            db._write_roles(conn, admin['id'], roles)
+
     def test_migration_is_idempotent_and_does_not_assign_users(self):
+        # Demote the bootstrap super admin, then let the one-time migration re-promote it.
         with db.get_conn() as conn:
             conn.execute("DELETE FROM schema_migrations WHERE name='project_access_v1'")
-            conn.execute("UPDATE users SET role='ADMIN' WHERE email='admin@controltower.local'")
+        self._set_roles('admin@controltower.local', ['ADMIN'])
         db.migrate_super_admin(); db.migrate_super_admin(); db.init_db()
-        self.assertEqual(db.get_user_by_email('admin@controltower.local')['role'], 'SUPER_ADMIN')
+        self.assertIn('SUPER_ADMIN', db.get_user_by_email('admin@controltower.local')['roles'])
         self.assertEqual(db.project_member_ids(self.b), [])
-        with db.get_conn() as conn:
-            conn.execute("UPDATE users SET role='ADMIN' WHERE email='admin@controltower.local'")
+        # Once the migration flag is set, re-running must NOT re-promote.
+        self._set_roles('admin@controltower.local', ['ADMIN'])
         db.migrate_super_admin()
-        self.assertEqual(db.get_user_by_email('admin@controltower.local')['role'], 'ADMIN')
+        self.assertEqual(db.get_user_by_email('admin@controltower.local')['roles'], ['ADMIN'])
+
+    def test_multi_role_user_gets_union_of_capabilities(self):
+        # A DevOps + Cyber Manager user can BOTH scan and review (union of permissions).
+        hybrid = db.create_user('hybrid@example.com', 'Hybrid', 'Test-only-123',
+                                 ['DEVOPS_ENGINEER', 'CYBER_MANAGER'])
+        db.set_project_members(self.a, [hybrid['id']])
+        headers = self.login('hybrid@example.com', 'Test-only-123')
+        self.assertEqual(sorted(hybrid['roles']), ['CYBER_MANAGER', 'DEVOPS_ENGINEER'])
+        with patch('api.main._run_pipeline', new=AsyncMock()):
+            self.assertEqual(self.client.post('/scan', headers=headers,
+                json={'projectId': self.a, 'imageRef': 'nginx'}).status_code, 200)
+        # Reviewer capability passes the guard (pure DevOps would be 403 here).
+        self.assertNotEqual(self.client.post('/run/run-a/decision', headers=headers,
+            json={'cve_id': 'CVE-test', 'decision': 'approved'}).status_code, 403)
 
 
 if __name__ == '__main__':

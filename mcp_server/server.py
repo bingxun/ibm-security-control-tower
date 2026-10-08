@@ -92,7 +92,7 @@ def persist_decision_tool(
         {"id": "<record_id>", "stored": true}
     """
     user = _project_user(session_token, project_id)
-    if user["role"] not in {"SUPER_ADMIN", "ADMIN", "CYBER_MANAGER"}:
+    if not (set(user.get("roles") or [user.get("role")]) & {"SUPER_ADMIN", "ADMIN", "CYBER_MANAGER"}):
         raise ValueError("Your role cannot persist decisions")
     record_id = persist_decision(
         cve_id=cve_id,
@@ -114,7 +114,8 @@ def memory_stats_tool(session_token: str = "") -> dict:
         {"total_decisions": int}
     """
     user = _project_user(session_token)
-    project_ids = None if user["role"] == "SUPER_ADMIN" else [p["id"] for p in list_projects(user)]
+    is_super = "SUPER_ADMIN" in (user.get("roles") or [user.get("role")])
+    project_ids = None if is_super else [p["id"] for p in list_projects(user)]
     return {"total_decisions": count_decisions(project_ids)}
 
 

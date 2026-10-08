@@ -6,7 +6,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  role: UserRole;
+  roles: UserRole[];
   avatarInitials: string;
 }
 
@@ -17,6 +17,20 @@ export interface RolePermissions {
   canViewSettings: boolean; // access settings page
   canManageProjects: boolean;
   canManageUsers: boolean;  // user management (super admin only)
+}
+
+/** Combine several roles into a single permission set (logical OR per capability). */
+export function permissionsForRoles(roles: UserRole[]): RolePermissions {
+  return (roles ?? []).reduce<RolePermissions>((acc, role) => {
+    const p = ROLE_PERMISSIONS[role] ?? ROLE_PERMISSIONS.DEVOPS_ENGINEER;
+    return {
+      canScan: acc.canScan || p.canScan,
+      canApprove: acc.canApprove || p.canApprove,
+      canViewSettings: acc.canViewSettings || p.canViewSettings,
+      canManageProjects: acc.canManageProjects || p.canManageProjects,
+      canManageUsers: acc.canManageUsers || p.canManageUsers,
+    };
+  }, { canScan: false, canApprove: false, canViewSettings: false, canManageProjects: false, canManageUsers: false });
 }
 
 export const ROLE_PERMISSIONS: Record<UserRole, RolePermissions> = {

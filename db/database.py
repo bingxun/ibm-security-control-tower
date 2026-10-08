@@ -155,6 +155,12 @@ def init_db() -> None:
                 PRIMARY KEY (project_id, user_id)
             );
             CREATE INDEX IF NOT EXISTS idx_members_user ON project_members(user_id);
+            CREATE TABLE IF NOT EXISTS user_roles (
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                role    TEXT NOT NULL,
+                PRIMARY KEY (user_id, role)
+            );
+            CREATE INDEX IF NOT EXISTS idx_user_roles_user ON user_roles(user_id);
             CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY);
             CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project_id);
         """)
@@ -379,7 +385,7 @@ def get_scan_summaries(limit: int = 50, project_ids: list[str] | None = None) ->
     where, args = project_filter(project_ids)
     with get_conn() as conn:
         rows = conn.execute(
-            f"SELECT * FROM runs WHERE {where} ORDER BY started_at DESC LIMIT ?", (*args, limit)
+            f"SELECT rowid AS seq, * FROM runs WHERE {where} ORDER BY started_at DESC LIMIT ?", (*args, limit)
         ).fetchall()
         result = []
         for r in rows:
@@ -403,6 +409,7 @@ def get_scan_summaries(limit: int = 50, project_ids: list[str] | None = None) ->
                 duration = "—"
             result.append({
                 "id":        run_id,
+                "seq":       run.get("seq"),
                 "project":   run["project_id"],
                 "image":     run["image_ref"],
                 "date":      started[:10] if started else "",
@@ -421,18 +428,54 @@ def get_scan_summaries(limit: int = 50, project_ids: list[str] | None = None) ->
 # ── User CRUD ──────────────────────────────────────────────────────────────
 
 VALID_ROLES = {"SUPER_ADMIN", "ADMIN", "DEVOPS_ENGINEER", "CYBER_MANAGER"}
+# Highest privilege first — used only to pick a display "primary" role.
+ROLE_PRIORITY = ["SUPER_ADMIN", "ADMIN", "CYBER_MANAGER", "DEVOPS_ENGINEER"]
 SESSION_TTL_HOURS = 24
+
+
+def _primary_role(roles: list[str]) -> str:
+    """Pick a stable display 'primary' role from a user's role set."""
+    for role in ROLE_PRIORITY:
+        if role in roles:
+            return role
+    return roles[0] if roles else "DEVOPS_ENGINEER"
+
+
+def _attach_roles(conn, row: dict | None) -> dict | None:
+    """Populate `roles` (full set, priority-sorted) and `role` (primary) on a user row."""
+    if row is None:
+        return None
+    found = {r[0] for r in conn.execute("SELECT role FROM user_roles WHERE user_id=?", (row["id"],))}
+    # Fall back to the legacy column if the join table is empty (pre-migration rows).
+    if not found and row.get("role"):
+        found = {row["role"]}
+    roles = [r for r in ROLE_PRIORITY if r in found] + sorted(found - set(ROLE_PRIORITY))
+    row["roles"] = roles
+    row["role"] = _primary_role(roles)
+    return row
+
+
+def _write_roles(conn, user_id: str, roles: list[str]) -> None:
+    """Replace a user's role set and mirror the primary onto users.role."""
+    clean = [r for r in roles if r in VALID_ROLES]
+    if not clean:
+        raise ValueError("A user must have at least one valid role")
+    conn.execute("DELETE FROM user_roles WHERE user_id=?", (user_id,))
+    conn.executemany("INSERT INTO user_roles(user_id, role) VALUES (?,?)", [(user_id, r) for r in set(clean)])
+    conn.execute("UPDATE users SET role=? WHERE id=?", (_primary_role(clean), user_id))
 
 
 def create_user(
     email: str,
     name: str,
     password: str,
-    role: str = "DEVOPS_ENGINEER",
+    roles: list[str] | None = None,
 ) -> dict:
     """Create a new user. Raises ValueError on duplicate email or bad role."""
-    if role not in VALID_ROLES:
-        raise ValueError(f"Invalid role: {role}")
+    roles = roles or ["DEVOPS_ENGINEER"]
+    invalid = [r for r in roles if r not in VALID_ROLES]
+    if invalid or not roles:
+        raise ValueError(f"Invalid role(s): {invalid}")
     user_id = str(uuid_gen())
     now = datetime.now(timezone.utc).isoformat()
     with get_conn() as conn:
@@ -440,10 +483,11 @@ def create_user(
             conn.execute(
                 """INSERT INTO users (id, email, name, role, password_hash, is_active, created_at, updated_at)
                    VALUES (?,?,?,?,?,1,?,?)""",
-                (user_id, email.lower(), name, role, _hash_password(password), now, now),
+                (user_id, email.lower(), name, _primary_role(roles), _hash_password(password), now, now),
             )
         except sqlite3.IntegrityError:
             raise ValueError(f"Email already registered: {email}")
+        _write_roles(conn, user_id, roles)
     return get_user_by_id(user_id)  # type: ignore[return-value]
 
 
@@ -453,7 +497,7 @@ def get_user_by_id(user_id: str) -> dict | None:
             "SELECT id, email, name, role, is_active, created_at, updated_at FROM users WHERE id=?",
             (user_id,),
         ).fetchone()
-        return dict(row) if row else None
+        return _attach_roles(conn, dict(row) if row else None)
 
 
 def get_user_by_email(email: str) -> dict | None:
@@ -462,7 +506,7 @@ def get_user_by_email(email: str) -> dict | None:
         row = conn.execute(
             "SELECT * FROM users WHERE email=?", (email.lower(),)
         ).fetchone()
-        return dict(row) if row else None
+        return _attach_roles(conn, dict(row) if row else None)
 
 
 def list_users() -> list[dict]:
@@ -470,25 +514,28 @@ def list_users() -> list[dict]:
         rows = conn.execute(
             "SELECT id, email, name, role, is_active, created_at, updated_at FROM users ORDER BY created_at DESC"
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [_attach_roles(conn, dict(r)) for r in rows]
 
 
 def update_user(
     user_id: str,
     *,
     name: str | None = None,
-    role: str | None = None,
+    roles: list[str] | None = None,
     is_active: bool | None = None,
     password: str | None = None,
 ) -> dict | None:
-    if role and role not in VALID_ROLES:
-        raise ValueError(f"Invalid role: {role}")
+    if roles is not None:
+        invalid = [r for r in roles if r not in VALID_ROLES]
+        if invalid or not roles:
+            raise ValueError(f"Invalid role(s): {invalid}")
     now = datetime.now(timezone.utc).isoformat()
     with get_conn() as conn:
         if name is not None:
             conn.execute("UPDATE users SET name=?, updated_at=? WHERE id=?", (name, now, user_id))
-        if role is not None:
-            conn.execute("UPDATE users SET role=?, updated_at=? WHERE id=?", (role, now, user_id))
+        if roles is not None:
+            _write_roles(conn, user_id, roles)
+            conn.execute("UPDATE users SET updated_at=? WHERE id=?", (now, user_id))
         if is_active is not None:
             conn.execute("UPDATE users SET is_active=?, updated_at=? WHERE id=?", (int(is_active), now, user_id))
         if password is not None:
@@ -527,7 +574,7 @@ def get_session_user(token: str) -> dict | None:
                WHERE s.token=? AND s.expires_at > ? AND u.is_active=1""",
             (token, now),
         ).fetchone()
-        return dict(row) if row else None
+        return _attach_roles(conn, dict(row) if row else None)
 
 
 def delete_session(token: str) -> None:
@@ -552,7 +599,7 @@ def seed_admin(
     with get_conn() as conn:
         count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     if count == 0:
-        create_user(email=email, name=name, password=password, role="SUPER_ADMIN")
+        create_user(email=email, name=name, password=password, roles=["SUPER_ADMIN"])
         import logging
         logging.getLogger("control_tower").info(
             "Seeded default admin: %s / %s", email, password
@@ -569,12 +616,25 @@ def migrate_super_admin() -> None:
             cursor = conn.execute("UPDATE users SET role='SUPER_ADMIN' WHERE email=? AND role='ADMIN' AND is_active=1", (email,))
             if not cursor.rowcount:
                 raise RuntimeError("Set SUPER_ADMIN_EMAIL to an existing active admin before enabling project access")
+        # Keep the authoritative role set in sync with the promoted account.
+        conn.execute("""INSERT OR IGNORE INTO user_roles(user_id, role)
+                        SELECT id, 'SUPER_ADMIN' FROM users WHERE role='SUPER_ADMIN'""")
         conn.execute("INSERT INTO schema_migrations(name) VALUES ('project_access_v1')")
+
+
+def migrate_multi_role() -> None:
+    """Backfill the user_roles join table from the legacy users.role column (once)."""
+    with get_conn() as conn:
+        if conn.execute("SELECT 1 FROM schema_migrations WHERE name='multi_role_v1'").fetchone():
+            return
+        conn.execute("""INSERT OR IGNORE INTO user_roles(user_id, role)
+                        SELECT id, role FROM users""")
+        conn.execute("INSERT INTO schema_migrations(name) VALUES ('multi_role_v1')")
 
 
 def list_projects(user: dict) -> list[dict]:
     with get_conn() as conn:
-        if user["role"] == "SUPER_ADMIN":
+        if "SUPER_ADMIN" in user.get("roles", [user.get("role")]):
             rows = conn.execute("SELECT * FROM projects ORDER BY name, id").fetchall()
         else:
             rows = conn.execute("""SELECT p.* FROM projects p JOIN project_members m ON p.id=m.project_id
@@ -590,7 +650,7 @@ def get_project(project_id: str) -> dict | None:
 
 def has_project_access(user: dict, project_id: str) -> bool:
     with get_conn() as conn:
-        if user["role"] == "SUPER_ADMIN":
+        if "SUPER_ADMIN" in user.get("roles", [user.get("role")]):
             return conn.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone() is not None
         return conn.execute("SELECT 1 FROM project_members WHERE project_id=? AND user_id=?", (project_id, user["id"])).fetchone() is not None
 
@@ -613,7 +673,9 @@ def set_project_members(project_id: str, user_ids: list[str]) -> None:
         if not conn.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
             raise ValueError("Project not found")
         for user_id in set(user_ids):
-            if not conn.execute("SELECT 1 FROM users WHERE id=? AND role!='SUPER_ADMIN'", (user_id,)).fetchone():
+            exists = conn.execute("SELECT 1 FROM users WHERE id=?", (user_id,)).fetchone()
+            is_super = conn.execute("SELECT 1 FROM user_roles WHERE user_id=? AND role='SUPER_ADMIN'", (user_id,)).fetchone()
+            if not exists or is_super:
                 raise ValueError("Select valid non-super-admin accounts")
         conn.execute("DELETE FROM project_members WHERE project_id=?", (project_id,))
         conn.executemany("INSERT INTO project_members(project_id,user_id) VALUES (?,?)",

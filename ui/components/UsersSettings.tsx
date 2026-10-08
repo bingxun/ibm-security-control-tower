@@ -15,7 +15,40 @@ const descriptions: Record<UserRole, string> = {
 };
 const control = styles.field;
 const button = styles.button;
-const emptyDraft = { name: "", email: "", password: "", role: "DEVOPS_ENGINEER" as UserRole };
+const emptyDraft = { name: "", email: "", password: "", roles: ["DEVOPS_ENGINEER"] as UserRole[] };
+
+/** A compact toggle-chip group for selecting one or more roles. Always keeps ≥1 selected. */
+function RolePicker({ value, onChange, disabled, idPrefix }: { value: UserRole[]; onChange: (roles: UserRole[]) => void; disabled?: boolean; idPrefix: string }) {
+  const toggle = (role: UserRole) => {
+    const has = value.includes(role);
+    if (has && value.length === 1) return; // keep at least one role
+    onChange(has ? value.filter((r) => r !== role) : [...value, role]);
+  };
+  return (
+    <div role="group" aria-label="Roles" className="flex flex-wrap gap-1.5">
+      {roles.map((role) => {
+        const c = ROLE_COLORS[role];
+        const on = value.includes(role);
+        return (
+          <button
+            key={role}
+            type="button"
+            id={`${idPrefix}-${role}`}
+            aria-pressed={on}
+            disabled={disabled}
+            onClick={() => toggle(role)}
+            className="text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
+            style={on
+              ? { background: c.bg, color: c.text, borderColor: c.border }
+              : { background: "transparent", color: "var(--muted)", borderColor: "var(--border2)" }}
+          >
+            {ROLE_LABELS[role]}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function UsersSettings() {
   const { user, permissions } = useAuth();
@@ -76,7 +109,7 @@ export default function UsersSettings() {
     try {
       const updated = await updatePlatformUser(account.id, payload);
       setUsers((items) => items.map((item) => item.id === updated.id ? updated : item));
-      setSuccess(payload.role ? `${updated.name} is now a ${ROLE_LABELS[updated.role]}.`
+      setSuccess(payload.roles ? `${updated.name} is now ${updated.roles.map(r => ROLE_LABELS[r]).join(", ")}.`
         : `${updated.name} ${updated.is_active ? "activated" : "deactivated"}.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to update user.");
@@ -111,7 +144,7 @@ export default function UsersSettings() {
             <label className="space-y-1 text-sm">Name<input className={control} name="name" autoComplete="off" required value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></label>
             <label className="space-y-1 text-sm">Email<input className={control} name="email" type="email" autoComplete="off" autoCapitalize="none" spellCheck={false} required value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} /></label>
             <label className="space-y-1 text-sm"><span id="new-user-password-label">Password</span><input aria-labelledby="new-user-password-label" className={control} name="password" type="password" autoComplete="new-password" required minLength={8} aria-describedby="new-password-help" value={draft.password} onChange={(e) => setDraft({ ...draft, password: e.target.value })} /><span id="new-password-help" className="text-xs text-[var(--faint)]">At least 8 characters.</span></label>
-            <label className="space-y-1 text-sm"><span id="new-user-role-label">Role</span><select aria-labelledby="new-user-role-label" className={styles.select} value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value as UserRole })}>{roles.map((role) => <option key={role} value={role}>{ROLE_LABELS[role]}</option>)}</select></label>
+            <div className="space-y-1.5 text-sm sm:col-span-2"><span>Roles <span className="text-[var(--faint)]">(one or more)</span></span><RolePicker idPrefix="new-user-role" value={draft.roles} onChange={(roles) => setDraft({ ...draft, roles })} disabled={busy !== null} /></div>
           </fieldset>
           <button type="submit" disabled={busy !== null} className={`${button} bg-[var(--btn-accept-bg)] text-[var(--btn-accept-text)] hover:opacity-90`}>{busy === "create" ? "Creating…" : "Create account"}</button>
         </form>}
@@ -124,7 +157,7 @@ export default function UsersSettings() {
               const self = account.id === user?.id;
               return <tr key={account.id} aria-busy={busy === account.id} className="border-t border-[var(--border)]">
                 <th scope="row" className="p-3 font-normal"><div className="flex items-center gap-3"><span className={styles.avatar} aria-hidden="true">{account.name.split(" ").map(part => part[0]).slice(0, 2).join("").toUpperCase()}</span><div><div className="font-semibold text-[var(--heading)]">{account.name}{self && <span className="ml-2 text-xs font-normal text-[var(--faint)]">(you)</span>}</div><div className="mt-1 break-all text-xs text-[var(--faint)]">{account.email}</div></div></div></th>
-                <td className="p-3"><select aria-label={`Role for ${account.email}`} aria-describedby={self ? "self-account-help" : undefined} className={`${styles.select} ${styles.roleSelect}`} style={{ backgroundColor: ROLE_COLORS[account.role].bg, borderColor: ROLE_COLORS[account.role].border, color: ROLE_COLORS[account.role].text }} value={account.role} disabled={self || busy !== null} onChange={(e) => update(account, { role: e.target.value as UserRole })}>{roles.map((role) => <option key={role} value={role}>{ROLE_LABELS[role]}</option>)}</select></td>
+                <td className="p-3"><RolePicker idPrefix={`role-${account.id}`} value={account.roles} onChange={(roles) => update(account, { roles })} disabled={self || busy !== null} /></td>
                 <td className="p-3"><button type="button" className={styles.status} role="switch" aria-checked={Boolean(account.is_active)} aria-label={`Account active for ${account.email}`} aria-describedby={self ? "self-account-help" : undefined} disabled={self || busy !== null} onClick={() => update(account, { is_active: !account.is_active })}>{account.is_active ? "Active" : "Inactive"}</button></td>
               </tr>;
             })}</tbody>

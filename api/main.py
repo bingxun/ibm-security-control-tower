@@ -49,7 +49,7 @@ from db.database import (
     create_user, get_user_by_id, get_user_by_email, list_users,
     update_user, delete_user,
     create_session, get_session_user, delete_session,
-    seed_admin, VALID_ROLES, migrate_super_admin,
+    seed_admin, VALID_ROLES, migrate_super_admin, migrate_multi_role,
     list_projects, get_project, has_project_access, create_project,
     project_member_ids, set_project_members,
 )
@@ -472,6 +472,7 @@ async def lifespan(app: FastAPI):
     init_db()       # create tables if they don't exist
     seed_admin()
     migrate_super_admin()
+    migrate_multi_role()
     yield
 
 app = FastAPI(title="Control Tower API", version="1.0.0", lifespan=lifespan)
@@ -513,21 +514,30 @@ def require_auth(
     return user
 
 
+# Capability → the set of roles that grants it. A user needs ANY one of them.
+SCANNER_ROLES  = {"SUPER_ADMIN", "ADMIN", "DEVOPS_ENGINEER"}
+REVIEWER_ROLES = {"SUPER_ADMIN", "ADMIN", "CYBER_MANAGER"}
+
+
+def _roles(user: dict) -> set[str]:
+    return set(user.get("roles") or ([user["role"]] if user.get("role") else []))
+
+
 def require_super_admin(current_user: dict = Depends(require_auth)) -> dict:
     """Dependency: only super admins administer global users and projects."""
-    if current_user["role"] != "SUPER_ADMIN":
+    if "SUPER_ADMIN" not in _roles(current_user):
         raise HTTPException(status_code=403, detail="Super admin access required")
     return current_user
 
 
 def require_scanner(user: dict = Depends(require_auth)) -> dict:
-    if user["role"] not in {"SUPER_ADMIN", "ADMIN", "DEVOPS_ENGINEER"}:
+    if not (_roles(user) & SCANNER_ROLES):
         raise HTTPException(status_code=403, detail="Your role cannot start scans")
     return user
 
 
 def require_reviewer(user: dict = Depends(require_auth)) -> dict:
-    if user["role"] not in {"SUPER_ADMIN", "ADMIN", "CYBER_MANAGER"}:
+    if not (_roles(user) & REVIEWER_ROLES):
         raise HTTPException(status_code=403, detail="Your role cannot review findings")
     return user
 
@@ -536,7 +546,7 @@ def accessible_projects(user: dict, project_id: str | None = None) -> list[str] 
     if project_id is not None:
         check_project(user, project_id)
         return [project_id]
-    return None if user["role"] == "SUPER_ADMIN" else [p["id"] for p in list_projects(user)]
+    return None if "SUPER_ADMIN" in _roles(user) else [p["id"] for p in list_projects(user)]
 
 
 def check_project(user: dict, project_id: str) -> None:
@@ -556,7 +566,7 @@ def safe_snapshot(user: dict, run_id: str) -> dict:
     snapshot = _run_snapshot(run_id)
     # Older AI text may contain cross-project memory. Keep raw findings available,
     # but expose historical generated content only to the super admin.
-    if not run.get("project_scoped") and user["role"] != "SUPER_ADMIN":
+    if not run.get("project_scoped") and "SUPER_ADMIN" not in _roles(user):
         for cve in snapshot.get("cves", []):
             cve["ragMatch"] = None
             cve["rationale"] = "Historical rationale withheld. Run a new scan for project-isolated analysis."
@@ -581,7 +591,7 @@ async def start_scan(req: ScanRequest, user: dict = Depends(require_scanner)):
     Persists the run to SQLite straight away so it survives restarts.
     """
     check_project(user, req.projectId)
-    if req.autoApproveBelow != "none" and user["role"] == "DEVOPS_ENGINEER":
+    if req.autoApproveBelow != "none" and not (_roles(user) & REVIEWER_ROLES):
         raise HTTPException(status_code=403, detail="Your role cannot auto-approve findings")
     run_id = str(uuid.uuid4())
     meta = req.model_dump()
@@ -836,12 +846,12 @@ class CreateUserRequest(BaseModel):
     email: str
     name: str
     password: str
-    role: str = "DEVOPS_ENGINEER"
+    roles: list[str] = ["DEVOPS_ENGINEER"]
 
 
 class UpdateUserRequest(BaseModel):
     name: str | None = None
-    role: str | None = None
+    roles: list[str] | None = None
     is_active: bool | None = None
     password: str | None = None
 
@@ -902,10 +912,10 @@ def users_list(_admin: dict = Depends(require_super_admin)):
 
 @app.post("/users", status_code=201)
 def users_create(req: CreateUserRequest, _admin: dict = Depends(require_super_admin)):
-    if req.role not in VALID_ROLES:
-        raise HTTPException(status_code=422, detail=f"Invalid role. Valid: {sorted(VALID_ROLES)}")
+    if not req.roles or any(r not in VALID_ROLES for r in req.roles):
+        raise HTTPException(status_code=422, detail=f"Invalid role(s). Valid: {sorted(VALID_ROLES)}")
     try:
-        user = create_user(email=req.email, name=req.name, password=req.password, role=req.role)
+        user = create_user(email=req.email, name=req.name, password=req.password, roles=req.roles)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return _safe_user(user)
@@ -920,14 +930,14 @@ def users_update(
     # Prevent admin from deactivating themselves
     if user_id == current_admin["id"] and req.is_active is False:
         raise HTTPException(status_code=400, detail="Cannot deactivate your own account")
-    if user_id == current_admin["id"] and req.role is not None and req.role != "SUPER_ADMIN":
-        raise HTTPException(status_code=400, detail="Cannot change your own super admin role")
-    if req.role is not None and req.role not in VALID_ROLES:
-        raise HTTPException(status_code=422, detail=f"Invalid role. Valid: {sorted(VALID_ROLES)}")
+    if user_id == current_admin["id"] and req.roles is not None and "SUPER_ADMIN" not in req.roles:
+        raise HTTPException(status_code=400, detail="Cannot remove your own super admin role")
+    if req.roles is not None and (not req.roles or any(r not in VALID_ROLES for r in req.roles)):
+        raise HTTPException(status_code=422, detail=f"Invalid role(s). Valid: {sorted(VALID_ROLES)}")
     updated = update_user(
         user_id,
         name=req.name,
-        role=req.role,
+        roles=req.roles,
         is_active=req.is_active,
         password=req.password,
     )

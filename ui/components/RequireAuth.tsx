@@ -57,7 +57,6 @@ export default function RequireAuth({ children, permission }: Props) {
 
   // Authenticated but lacks required permission
   if (permission && permissions && !permissions[permission]) {
-    const colors = ROLE_COLORS[user.role];
     return (
       <div
         className="min-h-screen flex items-center justify-center p-6"
@@ -85,15 +84,21 @@ export default function RequireAuth({ children, permission }: Props) {
             Your current role does not have permission to access this page.
           </p>
 
-          {/* Current role badge */}
-          <div className="flex items-center justify-center gap-2 mb-6">
+          {/* Current role badge(s) */}
+          <div className="flex items-center justify-center gap-2 mb-6 flex-wrap">
             <span className="text-[12px]" style={{ color: "var(--muted)" }}>Signed in as:</span>
-            <span
-              className="text-[11px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wide"
-              style={{ background: colors.bg, color: colors.text, border: `1px solid ${colors.border}` }}
-            >
-              {ROLE_LABELS[user.role]}
-            </span>
+            {user.roles.map((role) => {
+              const colors = ROLE_COLORS[role];
+              return (
+                <span
+                  key={role}
+                  className="text-[11px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wide"
+                  style={{ background: colors.bg, color: colors.text, border: `1px solid ${colors.border}` }}
+                >
+                  {ROLE_LABELS[role]}
+                </span>
+              );
+            })}
           </div>
 
           <button

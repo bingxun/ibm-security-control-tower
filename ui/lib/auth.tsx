@@ -14,7 +14,7 @@ import {
   type ReactNode,
 } from "react";
 import type { User, RolePermissions } from "./types";
-import { ROLE_PERMISSIONS } from "./types";
+import { permissionsForRoles } from "./types";
 import { apiLogin, apiLogout, apiMe, getToken, setToken, clearToken } from "./api";
 
 // ── Context shape ──────────────────────────────────────────────────────────
@@ -66,7 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
-  const permissions = user ? ROLE_PERMISSIONS[user.role] : null;
+  const permissions = user ? permissionsForRoles(user.roles) : null;
 
   return (
     <AuthContext.Provider value={{ user, permissions, login, logout, isLoading }}>

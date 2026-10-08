@@ -51,6 +51,7 @@ export interface ScanRun {
 
 export interface ScanSummary {
   id: string;
+  seq: number;
   project: string;
   image: string;
   date: string;
@@ -225,12 +226,12 @@ export interface CreateUserPayload {
   email:    string;
   name:     string;
   password: string;
-  role:     UserRole;
+  roles:    UserRole[];
 }
 
 export interface UpdateUserPayload {
   name?:      string;
-  role?:      UserRole;
+  roles?:     UserRole[];
   is_active?: boolean;
   password?:  string;
 }
@@ -240,7 +241,7 @@ export interface PlatformUser {
   id: string;
   email: string;
   name: string;
-  role: UserRole;
+  roles: UserRole[];
   is_active: boolean | 0 | 1;
   created_at: string;
   updated_at: string;

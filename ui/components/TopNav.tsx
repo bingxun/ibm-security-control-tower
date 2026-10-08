@@ -26,7 +26,7 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
     router.replace("/login");
   };
 
-  const roleColors = user ? ROLE_COLORS[user.role] : null;
+  const roles = user?.roles ?? [];
 
   return (
     <nav
@@ -147,14 +147,14 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
       {/* Theme switcher */}
       <ThemeSwitcher />
 
-      {/* Agent status */}
-      {(() => {
+      {/* Agent status — only while a run actually reports one */}
+      {agentStatus && (() => {
         const cfg = {
           running:  { bg: "var(--accent-purple-bg)", bdr: "var(--accent-purple-bdr)", color: "var(--accent-purple)",  dot: "var(--accent-purple)",  label: "Agent running",  pulse: true  },
           awaiting: { bg: "var(--accent-yellow-bg, rgba(210,153,34,0.08))", bdr: "rgba(210,153,34,0.2)", color: "var(--accent-yellow)", dot: "var(--accent-yellow)", label: "Awaiting review", pulse: false },
           done:     { bg: "var(--accent-green-bg)",  bdr: "var(--accent-green-bdr)",  color: "var(--accent-green)",   dot: "var(--accent-green)",   label: "Run complete",   pulse: false },
           error:    { bg: "var(--accent-red-bg)",    bdr: "var(--accent-red-bdr)",    color: "var(--accent-red)",     dot: "var(--accent-red)",     label: "Agent error",    pulse: false },
-        }[agentStatus ?? "awaiting"];
+        }[agentStatus];
         return (
           <div
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[12px] font-medium"
@@ -170,14 +170,22 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
       })()}
 
       {/* User chip + logout */}
-      {user && roleColors && (
+      {user && (
         <div className="flex items-center gap-2">
-          {/* Role badge */}
-          <span
-            className="text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wide hidden sm:inline"
-            style={{ background: roleColors.bg, color: roleColors.text, border: `1px solid ${roleColors.border}` }}
-          >
-            {ROLE_LABELS[user.role]}
+          {/* Role badges — one per role the user holds */}
+          <span className="hidden sm:flex items-center gap-1">
+            {roles.map((role) => {
+              const c = ROLE_COLORS[role];
+              return (
+                <span
+                  key={role}
+                  className="text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wide"
+                  style={{ background: c.bg, color: c.text, border: `1px solid ${c.border}` }}
+                >
+                  {ROLE_LABELS[role]}
+                </span>
+              );
+            })}
           </span>
 
           {/* Name + avatar */}
