@@ -60,6 +60,7 @@ export interface ScanPayload {
   scanner: string;
   autoApproveBelow: string;
   trivyJson?: object;
+  environmentMarkdown?: string;
 }
 
 export interface ScanRun {
@@ -87,6 +88,7 @@ export interface ScanSummary {
   medium: number;
   approved: number;
   rejected: number;
+  changesRequested: number;
   status: "queued" | "scanning" | "running" | "awaiting_approval" | "completed" | "error";
   duration: string;
 }
@@ -97,14 +99,32 @@ export interface DashboardStats {
   avgApprovalRate: number;
   ragDecisions: number;
   ragFirstPassRate: number;
+  autoApproved: number;
 }
 
 export interface DecisionPayload {
   cve_id: string;
-  decision: "approved" | "rejected" | "submitted";
+  decision: "approved" | "rejected" | "submitted" | "changes_requested";
   edited_rationale?: string;
   pkg?: string;
   edited_by_role?: string;
+  // DevOps draft edits (sent on submit/resubmit)
+  justification?: string;
+  remediation?: string;
+  notes?: string;
+  // Cyber review fields
+  review_comment?: string;
+  requested_changes?: string;
+  ai_suggestions_applied?: string[];
+}
+
+export interface ReviewAiPayload {
+  cve_id: string;
+  pkg: string;
+  mode: "draft" | "review";
+  justification?: string;
+  remediation?: string;
+  notes?: string;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -179,12 +199,44 @@ export async function getRun(runId: string): Promise<ScanRun> {
   return get(`/run/${runId}`);
 }
 
-/** Submit a human decision for a CVE in the given run (approve/reject/submit). */
+/** Submit a human decision for a CVE in the given run (approve/reject/submit/request-changes). */
 export async function submitDecision(
   runId: string,
   payload: DecisionPayload
 ): Promise<void> {
   await post(`/run/${runId}/decision`, payload);
+}
+
+/** Reconcile a run against published baselines — auto-approve exact matches. Agent-attributed, audited. */
+export async function applyBaselines(runId: string): Promise<{ applied: number }> {
+  return post(`/run/${encodeURIComponent(runId)}/apply-baselines`, {});
+}
+
+/** Fetch the ordered submission/decision history for one finding. */
+export async function getRevisions(
+  runId: string,
+  cveId: string,
+  pkg: string
+): Promise<import("./types").RevisionRecord[]> {
+  return get(`/run/${encodeURIComponent(runId)}/revisions?cve_id=${encodeURIComponent(cveId)}&pkg=${encodeURIComponent(pkg)}`);
+}
+
+/** Ask Review AI to evaluate a draft. Read-only — never writes or submits. */
+export async function requestReviewAI(
+  runId: string,
+  payload: ReviewAiPayload
+): Promise<import("./types").ReviewAiResult> {
+  return post(`/run/${encodeURIComponent(runId)}/review-ai`, payload);
+}
+
+export interface ChatMessage { role: "user" | "assistant"; content: string; }
+
+/** Scoped product + CVE assistant. Read-only; grounded on the user's visible data. */
+export async function sendChat(
+  messages: ChatMessage[],
+  runId?: string
+): Promise<{ reply: string; source: "rad" | "stub" }> {
+  return post("/chat", { messages, run_id: runId });
 }
 
 /** Fetch past scan summaries for the dashboard. */
@@ -354,3 +406,28 @@ export function getProjectMembers(projectId: string): Promise<{ user_ids: string
 export function saveProjectMembers(projectId: string, user_ids: string[]): Promise<{ user_ids: string[] }> {
   return userRequest(`/projects/${encodeURIComponent(projectId)}/members`, "PUT", { user_ids });
 }
+
+export async function downloadProjectReport(projectId: string, template = false): Promise<void> {
+  const response = await fetch(`${BASE}/projects/${encodeURIComponent(projectId)}/report?template=${template}`, { headers: authHeaders() });
+  if (!response.ok) throw new Error("Unable to download project CSV.");
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url; link.download = template ? "cyber-manager-template.csv" : "project-report.csv";
+  document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+}
+export function importProjectReport(projectId: string, content: string): Promise<{ updated: number; unchanged: number }> {
+  return userRequest(`/projects/${encodeURIComponent(projectId)}/report`, "POST", { content });
+}
+// ── LLM gateway settings (Claude / IBM RAD) ──────────────────────────────────
+export interface LlmConfig { base_url: string; model: string; token_set: boolean; token_hint: string; }
+export interface LlmConfigInput { base_url: string; model: string; token?: string }
+export function getLlmConfig(): Promise<LlmConfig> { return userRequest("/settings/llm"); }
+export function testLlmConfig(body: LlmConfigInput): Promise<{ ok: boolean; detail: string }> { return userRequest("/settings/llm/test", "POST", body); }
+export function saveLlmConfig(body: LlmConfigInput): Promise<LlmConfig> { return userRequest("/settings/llm", "PUT", body); }
+
+export interface SharedBaseline { id: string; cve_id: string; pkg: string; rationale: string; remediation: string; approver: string; published_at: string; }
+export function listBaselines(): Promise<SharedBaseline[]> { return userRequest("/baselines"); }
+export function publishBaseline(runId: string, cve_id: string, pkg: string, justification: string, remediation: string): Promise<{ id: string }> {
+  return userRequest(`/run/${encodeURIComponent(runId)}/baseline`, "POST", { cve_id, pkg, justification, remediation });
+}
+export function revokeBaseline(id: string): Promise<void> { return userRequest(`/baselines/${encodeURIComponent(id)}`, "DELETE"); }

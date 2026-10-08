@@ -8,6 +8,7 @@ import time
 
 from agent.state import AgentState, AgentStep
 from rag.store import persist_decision
+from db.database import get_conn
 
 
 def persist_node(state: AgentState) -> dict:
@@ -26,13 +27,17 @@ def persist_node(state: AgentState) -> dict:
         if not cve.get("rationale"):
             continue
 
+        with get_conn() as conn:
+            audit = conn.execute("SELECT reviewer FROM review_audit WHERE run_id=? AND cve_id=? AND pkg=? AND decision='approved' ORDER BY id DESC LIMIT 1",
+                                 (state['run_id'],cve['id'],cve['pkg'])).fetchone()
         persist_decision(
             cve_id=cve["id"],
             project_id=project_id,
             severity=cve["severity"],
             rationale=cve["rationale"],
-            approver="Auth Lead",   # populated from session in production
+            approver=audit[0] if audit else "Historical reviewer (unrecorded)",
             decision="approved",
+            pkg=cve["pkg"], remediation=cve.get("remediation", ""), run_id=state["run_id"],
         )
         persisted += 1
 

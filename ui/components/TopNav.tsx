@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import ThemeSwitcher from "./ThemeSwitcher";
+import CommandPalette from "./CommandPalette";
 import { useAuth } from "@/lib/auth";
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/types";
 
@@ -143,6 +144,10 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
           Settings
         </Link>
       )}
+
+      {/* Command palette (⌘K) — the floating assistant lives in the root layout
+          so it persists across page navigation. */}
+      <CommandPalette />
 
       {/* Theme switcher */}
       <ThemeSwitcher />

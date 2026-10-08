@@ -74,7 +74,48 @@ export const ROLE_COLORS: Record<UserRole, { bg: string; text: string; border: s
 // ── Domain types ───────────────────────────────────────────────────────────
 
 export type Severity = "critical" | "high" | "medium" | "low";
-export type CveStatus = "approved" | "rejected" | "submitted" | "pending" | "queued";
+export type CveStatus = "approved" | "rejected" | "submitted" | "changes_requested" | "pending" | "queued";
+
+/** A Review AI suggestion the user may apply (fills a field) or dismiss. */
+export interface ReviewSuggestion {
+  id: string;
+  type: "missing_evidence" | "unclear_assumption" | "improvement" | "review_comment";
+  title: string;
+  detail: string;
+  suggestedText?: string | null;
+}
+
+export interface ReviewAiResult {
+  summary: string;
+  suggestions: ReviewSuggestion[];
+  source: "rad" | "stub";
+}
+
+/** Extra fields carried alongside a review decision from the UI. */
+export interface DecisionExtra {
+  justification?: string;
+  remediation?: string;
+  notes?: string;
+  review_comment?: string;
+  requested_changes?: string;
+  ai_suggestions_applied?: string[];
+  edited_by_role?: string;
+}
+
+/** One append-only entry in a finding's submission/decision history. */
+export interface RevisionRecord {
+  round: number;
+  action: "submitted" | "approved" | "rejected" | "changes_requested";
+  actor: string;
+  actor_role: string;
+  justification: string;
+  remediation: string;
+  manual_notes: string;
+  review_comment: string;
+  requested_changes: string;
+  ai_suggestions_applied: string[];
+  created_at: string;
+}
 
 export interface CveRecord {
   id: string;
@@ -98,6 +139,8 @@ export interface CveRecord {
     approver: string;
     date: string;
     summary: string;
+    remediation?: string;
+    baselineId?: string;
   };
   status: CveStatus;
 }

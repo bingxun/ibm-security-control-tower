@@ -6,10 +6,26 @@ import { useSearchParams } from "next/navigation";
 import TopNav from "@/components/TopNav";
 import RequireAuth from "@/components/RequireAuth";
 import ScansTable from "@/components/ScansTable";
+import ProjectReports from "@/components/ProjectReports";
 import ProjectIcon from "@/components/ProjectIcon";
+import { PostureCard } from "@/components/home/HomeKit";
 import management from "@/components/Management.module.css";
 import { useAuth } from "@/lib/auth";
 import { listScans, listProjects, type Project, type ScanSummary } from "@/lib/api";
+
+type ScanFilter = "all" | "review" | "progress" | "done";
+const FILTERS: { key: ScanFilter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "review", label: "Awaiting review" },
+  { key: "progress", label: "In progress" },
+  { key: "done", label: "Completed" },
+];
+function matchesFilter(s: ScanSummary, f: ScanFilter): boolean {
+  if (f === "all") return true;
+  if (f === "review") return s.status === "awaiting_approval";
+  if (f === "done") return s.status === "completed";
+  return ["queued", "scanning", "running"].includes(s.status);
+}
 
 function NewScanButton() {
   return (
@@ -35,12 +51,13 @@ function ProjectScansInner() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
+  const [filter, setFilter] = useState<ScanFilter>("all");
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true); setError(null);
     Promise.all([listScans(projectId), listProjects()])
-      .then(([s, p]) => { if (!cancelled) { setScans(s); setProjects(p); } })
+      .then(([s, p]) => { if (!cancelled) { setScans(s); setProjects(p); setError(null); } })
       .catch((e) => { if (!cancelled) setError(e.message ?? "Failed to reach backend"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -52,6 +69,14 @@ function ProjectScansInner() {
   const latestPerImage = Array.from(
     scans.reduce((map, s) => (map.has(s.image) ? map : map.set(s.image, s)), new Map<string, ScanSummary>()).values()
   );
+
+  const q = query.trim().toLowerCase();
+  const visibleScans = latestPerImage.filter((s) => {
+    if (!matchesFilter(s, filter)) return false;
+    if (!q) return true;
+    const projName = (projects.find((p) => p.id === s.project)?.name ?? "").toLowerCase();
+    return s.image.toLowerCase().includes(q) || projName.includes(q);
+  });
 
   return (
     <div className="flex flex-col h-screen overflow-hidden" style={{ background: "var(--bg)", color: "var(--heading)" }}>
@@ -79,23 +104,48 @@ function ProjectScansInner() {
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-[15px] font-bold" style={{ color: "var(--heading)" }}>Images</h2>
+          {!loading && !error && latestPerImage.length > 0 && (
+            <div className="ct-fade-up"><PostureCard scans={latestPerImage} /></div>
+          )}
+
+          {projectId && project && <ProjectReports key={projectId} projectId={projectId} onImported={() => setRetry(n => n + 1)} />}
+
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-1.5 p-1 rounded-xl" style={{ background: "var(--surface2)", border: "1px solid var(--border)" }}>
+              {FILTERS.map((f) => {
+                const n = latestPerImage.filter((s) => matchesFilter(s, f.key)).length;
+                const active = filter === f.key;
+                return (
+                  <button key={f.key} type="button" onClick={() => setFilter(f.key)}
+                    className="px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-colors"
+                    style={{ background: active ? "var(--surface)" : "transparent", color: active ? "var(--heading)" : "var(--muted)", boxShadow: active ? "var(--shadow-card)" : "none" }}>
+                    {f.label}<span className="ml-1.5 font-mono" style={{ color: active ? "var(--accent-blue)" : "var(--dim)" }}>{n}</span>
+                  </button>
+                );
+              })}
+            </div>
             <div className="flex items-center gap-3">
-              <span className="text-[12px]" style={{ color: "var(--muted)" }}>{loading ? "Loading…" : `${latestPerImage.length} ${latestPerImage.length === 1 ? "image" : "images"}`}</span>
-              <button type="button" className={management.button} onClick={() => setRetry(n => n + 1)} disabled={loading}>Refresh</button>
+              <div className="relative">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" strokeWidth="2" strokeLinecap="round" className="absolute left-3 top-1/2 -translate-y-1/2">
+                  <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search image or project…"
+                  className="pl-9 pr-3 py-2 rounded-xl text-[12px] outline-none w-60"
+                  style={{ background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--body)" }} />
+              </div>
+              <button type="button" className={management.button} onClick={() => { setLoading(true); setError(null); setRetry(n => n + 1); }} disabled={loading}>Refresh</button>
             </div>
           </div>
 
           <ScansTable
-            scans={latestPerImage}
+            scans={visibleScans}
             projects={projects}
             loading={loading}
             error={error}
             reportable
-            emptyTitle={project ? `No scans in ${project.name}` : "No scans yet"}
-            emptyBody="Run a scan to see results here."
-            emptyActions={permissions?.canScan ? <NewScanButton /> : undefined}
+            emptyTitle={query || filter !== "all" ? "No matching scans" : project ? `No scans in ${project.name}` : "No scans yet"}
+            emptyBody={query || filter !== "all" ? "Try a different filter or search term." : "Run a scan to see results here."}
+            emptyActions={permissions?.canScan && !query && filter === "all" ? <NewScanButton /> : undefined}
           />
 
         </div>

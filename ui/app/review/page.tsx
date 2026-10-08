@@ -8,9 +8,16 @@ import CveQueue from "@/components/CveQueue";
 import CveReview from "@/components/CveReview";
 import ContextPanel from "@/components/ContextPanel";
 
-import { CveRecord, AgentStep, RunStats, cveKey } from "@/lib/types";
-import { streamRun, submitDecision, getRun, type ScanRun } from "@/lib/api";
-import Link from "next/link";
+import { CveRecord, AgentStep, RunStats, DecisionExtra, cveKey } from "@/lib/types";
+import { streamRun, submitDecision, getRun, applyBaselines, type ScanRun } from "@/lib/api";
+
+type Decision = "approved" | "rejected" | "submitted" | "changes_requested";
+const DECISION_TOAST: Record<Decision, string> = {
+  submitted: "Submitted for approval",
+  changes_requested: "Changes requested — returned to DevOps",
+  approved: "Approved",
+  rejected: "Rejected",
+};
 
 // ── Synthesis progress screen ──────────────────────────────────────────────
 function SynthesisLoader({
@@ -25,7 +32,7 @@ function SynthesisLoader({
   imageRef: string;
 }) {
   const total     = cves.length;
-  const synthesised = cves.filter((c) => c.status === "pending" || c.status === "approved" || c.status === "rejected").length;
+  const synthesised = cves.filter((c) => c.status === "submitted" || c.status === "pending" || c.status === "approved" || c.status === "rejected").length;
   const pct       = total > 0 ? Math.round((synthesised / total) * 100) : 0;
 
   const sevCounts = cves.reduce<Record<string, number>>((acc, c) => {
@@ -35,7 +42,7 @@ function SynthesisLoader({
   const stages = [
     { label: "Image Scan", done: true  },
     { label: "Ingest",     done: true  },
-    { label: "Synthesis",  done: false, active: true },
+    { label: "Master → CVE slaves", done: false, active: true },
     { label: "Approval",   done: false, active: false },
   ];
 
@@ -72,7 +79,7 @@ function SynthesisLoader({
         <div className="flex items-center gap-3 px-6 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
           <span className="w-2 h-2 rounded-full animate-pulse flex-shrink-0" style={{ background: "var(--accent-purple)" }} />
           <span className="text-[13px] font-semibold" style={{ color: "var(--accent-purple)" }}>
-            Synthesising rationale via Bob MCP…
+            Master coordinating CVE assessment workers…
           </span>
           <span className="ml-auto text-[12px] font-mono font-bold" style={{ color: "var(--heading)" }}>
             {synthesised} / {total}
@@ -186,11 +193,10 @@ function ReviewContent({ runId }: { runId: string | null }) {
   const [runError, setRunError] = useState<string | null>(null);
   const [projectId, setProjectId] = useState<string>("");
   const [imageRef, setImageRef] = useState<string>("");
-  // DevOps notes are held locally per CVE and sent with that CVE's submit.
-  const [draftNotes, setDraftNotes] = useState<Record<string, string>>({});
   const logEndRef = useRef<HTMLDivElement>(null);
 
   const streamCleanup = useRef<(() => void) | null>(null);
+  const reconciledRef = useRef(false);
 
   // Auto-scroll Trivy log
   useEffect(() => {
@@ -202,6 +208,17 @@ function ReviewContent({ runId }: { runId: string | null }) {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   }, []);
+
+  // When an awaiting run opens, reconcile it against published baselines once:
+  // any finding that exactly matches a baseline a Cyber Manager already approved
+  // is auto-approved by the agent (the SSE stream then reflects the new statuses).
+  useEffect(() => {
+    if (!runId || agentStatus !== "awaiting" || reconciledRef.current) return;
+    reconciledRef.current = true;
+    applyBaselines(runId)
+      .then((r) => { if (r.applied > 0) showToast(`${r.applied} finding${r.applied === 1 ? "" : "s"} auto-approved from a published baseline`, "success"); })
+      .catch(() => { /* non-fatal */ });
+  }, [runId, agentStatus, showToast]);
 
   // ── Load / stream data ───────────────────────────────────────────────────
   useEffect(() => {
@@ -230,7 +247,7 @@ function ReviewContent({ runId }: { runId: string | null }) {
         setCves(event.cves);
         setSelectedId((prev) => {
           if (prev) return prev;
-          const first = event.cves!.find((c) => c.status === "pending" || c.status === "queued") ?? event.cves![0];
+          const first = event.cves!.find((c) => c.status === "submitted" || c.status === "pending" || c.status === "queued") ?? event.cves![0];
           return first ? cveKey(first) : "";
         });
       }
@@ -289,38 +306,33 @@ function ReviewContent({ runId }: { runId: string | null }) {
     return () => { cancelled = true; cleanup(); clearInterval(pollInterval); };
   }, [runId]);
 
-  // ── Decision handler (approve / reject / submit-for-approval) ──────────────
+  // ── Decision handler (approve / reject / submit / request-changes) ─────────
   const handleDecision = useCallback(async (
     id: string,
-    decision: "approved" | "rejected" | "submitted",
-    editedRationale?: string,
+    decision: Decision,
     pkg?: string,
-    editedByRole?: string,
+    extra?: DecisionExtra,
   ) => {
     if (!runId) return;
     try {
-      await submitDecision(runId, { cve_id: id, decision, edited_rationale: editedRationale, pkg, edited_by_role: editedByRole });
+      await submitDecision(runId, { cve_id: id, decision, pkg, ...extra });
       // Match on id AND pkg — the same CVE id can span multiple packages.
       setCves(prev => prev.map(c => (c.id === id && (pkg === undefined || c.pkg === pkg))
-        ? { ...c, status: decision, manualNotes: editedRationale ?? c.manualNotes, edited: editedRationale ? true : c.edited, editedByRole: editedRationale ? editedByRole : c.editedByRole }
+        ? { ...c, status: decision,
+            rationale: extra?.justification ?? c.rationale,
+            remediation: extra?.remediation ?? c.remediation,
+            manualNotes: extra?.notes ?? c.manualNotes,
+            edited: (extra?.notes || extra?.justification || extra?.remediation) ? true : c.edited,
+            editedByRole: extra?.edited_by_role ?? c.editedByRole }
         : c));
-      showToast(decision === "submitted" ? "Submitted for approval" : "Decision saved", "success");
+      showToast(DECISION_TOAST[decision], "success");
     } catch {
       showToast(decision === "submitted" ? "Could not submit. Check your access and try again." : "Decision was not saved. Check your project access and try again.", "error");
     }
   }, [runId, showToast]);
 
-  // ── DevOps: save notes locally (sent with this CVE's submit) ───────────────
-  const handleSaveNotes = useCallback((key: string, notes: string) => {
-    setDraftNotes((prev) => ({ ...prev, [key]: notes }));
-  }, []);
-
   // ── Derived ───────────────────────────────────────────────────────────────
   const selectedCve = cves.find((c) => cveKey(c) === selectedId) ?? cves[0];
-  // Reflect any unsaved DevOps draft note on the selected CVE for display/editing.
-  const mergedSelectedCve = selectedCve
-    ? { ...selectedCve, manualNotes: draftNotes[cveKey(selectedCve)] ?? selectedCve.manualNotes }
-    : selectedCve;
   const reviewedCount = useMemo(
     () => cves.filter((c) => c.status === "approved" || c.status === "rejected").length,
     [cves]
@@ -440,16 +452,17 @@ function ReviewContent({ runId }: { runId: string | null }) {
               selectedId={selectedId}
               onSelect={setSelectedId}
             />
-            {mergedSelectedCve && (
+            {selectedCve && (
               <CveReview
-                cve={mergedSelectedCve}
+                key={cveKey(selectedCve)}
+                runId={runId ?? undefined}
+                cve={selectedCve}
                 agentSteps={agentSteps}
                 tokenFragment={tokenFragment}
                 totalCves={cves.length}
                 reviewedCount={reviewedCount}
                 approvedCount={liveStats.approved}
                 onDecision={handleDecision}
-                onSaveNotes={handleSaveNotes}
               />
             )}
             <ContextPanel stats={liveStats} cves={cves} />

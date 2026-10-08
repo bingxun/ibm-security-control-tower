@@ -149,7 +149,7 @@ Sign in as Super Admin, open **Settings → Projects**, create projects as neede
 **Assign users**, and save assignments. Create accounts in **Users & Roles** first.
 New Scan only offers accessible projects; the dashboard can filter accessible projects.
 
-RAG lookup is restricted to the current project. Historical generated rationale and logs may
+Private RAG lookup is restricted to the current project. Explicitly published Cyber Manager baselines are shared references across projects. Historical generated rationale and logs may
 contain cross-project context, so pre-migration generated content is visible only to Super Admin.
 Raw historical findings remain available to assigned users; run a new scan for isolated analysis.
 MCP memory tools require a valid `session_token` and project access; they no longer provide
@@ -165,3 +165,33 @@ DB_PATH=/tmp/project-check.db MILVUS_DB_PATH=/tmp/project-rag-check.json .venv/b
 cd ui
 PROJECTS_TEST_API=http://127.0.0.1:18001 node scripts/check-projects.mjs
 ```
+
+
+### Project review files and shared baselines
+
+- Home no longer shows Recent scans. Project pages retain per-image scan results.
+- New Scan offers **Cyber Manager policy baseline** and an optional UTF-8 `.md`
+  environment upload (100 KB maximum). Context is stored with the run and included
+  as evidence in assessment prompts; it is never treated as an instruction source.
+- On a project page, **Download project CSV** exports every scan and finding in
+  that project, including justification, remediation, status and reviewer notes.
+  Per-image CSV/PDF downloads are available before and after approval.
+- Cyber Managers (and Super Admins) can upload a completed CSV, up to 5 MB / 20,000
+  rows. Start with the downloaded project file. Preserve its identity columns,
+  set Status to `approved` or `rejected`, and complete Justification and Remediation.
+  The entire file is validated before review writes; unchanged rows are skipped.
+  Reimporting the same file is safe. A blank header template is also available.
+- Approved CVEs can be explicitly published from the CVE page. The publisher
+  writes reusable justification and remediation for all projects, without sharing
+  the source project's name, scan ID, or private context. Exact CVE/package matches
+  appear in future findings as references, never as automatic approvals. DSO and
+  Cyber Managers can inspect those references. Withdrawal stops future reuse;
+  existing scan snapshots retain their historical reference.
+- The pipeline displays the master coordinator and its parallel CVE slave workers
+  (memory lookup, assessment and remediation), followed by human review and persistence.
+  Review decisions are audited in SQLite and can continue after a backend restart.
+
+Restart the backend after updating to create the new baseline, audit and scan-context
+ tables automatically. Use one backend worker for the current in-memory scan orchestration.
+Validation: `python -m unittest discover -s tests -q` (using the project virtualenv),
+plus `npx tsc --noEmit` and ESLint in `ui`.

@@ -1,7 +1,7 @@
 """
 LangGraph pipeline — Agentic Cloud Security Control Tower
 Graph topology:
-    ingest → synthesis → approval ──(more pending?)──→ approval  (loop)
+    ingest → master → synthesis (parallel CVE slaves) → approval ──(more pending?)──→ approval  (loop)
                                   └─(all done)───────→ persist → END
 """
 from __future__ import annotations
@@ -14,7 +14,9 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from agent.state import AgentState
 from agent.nodes.ingest import ingest_node
+from agent.nodes.master import master_node
 from agent.nodes.synthesis import synthesis_node
+from agent.nodes.auto_triage import auto_triage_node
 from agent.nodes.approval import approval_node
 from agent.nodes.persist import persist_node
 
@@ -24,10 +26,11 @@ from agent.nodes.persist import persist_node
 def _route_after_approval(state: AgentState) -> Literal["approval", "persist"]:
     """Loop back to approval while any CVE is still non-terminal; otherwise persist.
 
-    Non-terminal = awaiting a human: `pending` (not yet submitted) or `submitted`
-    (awaiting Cyber approval). Persist runs only once every CVE is approved/rejected.
+    Non-terminal = awaiting a human: `pending` (not yet submitted), `submitted`
+    (awaiting Cyber approval), or `changes_requested` (sent back to DevOps to
+    revise and resubmit). Persist runs only once every CVE is approved/rejected.
     """
-    non_terminal = [c for c in state["cves"] if c["status"] in ("pending", "submitted")]
+    non_terminal = [c for c in state["cves"] if c["status"] in ("pending", "submitted", "changes_requested")]
     return "approval" if non_terminal else "persist"
 
 
@@ -37,13 +40,17 @@ def build_graph(checkpointer=None) -> StateGraph:
     builder = StateGraph(AgentState)
 
     builder.add_node("ingest", ingest_node)
+    builder.add_node("master", master_node)
     builder.add_node("synthesis", synthesis_node)
+    builder.add_node("auto_triage", auto_triage_node)
     builder.add_node("approval", approval_node)
     builder.add_node("persist", persist_node)
 
     builder.set_entry_point("ingest")
-    builder.add_edge("ingest", "synthesis")
-    builder.add_edge("synthesis", "approval")
+    builder.add_edge("ingest", "master")
+    builder.add_edge("master", "synthesis")
+    builder.add_edge("synthesis", "auto_triage")
+    builder.add_edge("auto_triage", "approval")
     builder.add_conditional_edges(
         "approval",
         _route_after_approval,
@@ -64,15 +71,19 @@ def make_initial_state(
     severity_threshold: str = "high",
     scanner: str = "trivy",
     run_id: str | None = None,
+    environment_markdown: str = "",
+    auto_approve_below: str = "none",
 ) -> AgentState:
     return AgentState(
         run_id=run_id or str(uuid.uuid4()),
         image_ref=image_ref,
         project_id=project_id,
         cis_profile=cis_profile,
+        environment_markdown=environment_markdown,
         severity_threshold=severity_threshold,
         scanner=scanner,
         scan_json=scan_json,
+        auto_approve_below=auto_approve_below,
         cves=[],
         current_cve_index=0,
         agent_steps=[],

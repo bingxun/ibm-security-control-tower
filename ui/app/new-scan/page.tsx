@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import TopNav from "@/components/TopNav";
 import RequireAuth from "@/components/RequireAuth";
-import { useAuth } from "@/lib/auth";
 import { startScan, listProjects, type Project } from "@/lib/api";
 
 // ── Form shape ─────────────────────────────────────────────────────────────
@@ -20,12 +19,21 @@ interface ScanForm {
 
   severityThreshold: "critical" | "high" | "medium" | "low";
   scanner: "trivy" | "grype";
-  autoApproveBelow: "none" | "medium" | "low";
+  // Severity ceiling for agentic auto-approval of findings matching a published baseline.
+  autoApproveBelow: "none" | "low" | "medium" | "high";
 }
+
+const AUTO_APPROVE_OPTS = [
+  { value: "none",   label: "Off" },
+  { value: "low",    label: "Up to Low" },
+  { value: "medium", label: "Up to Medium" },
+  { value: "high",   label: "Up to High" },
+] as const;
 
 const REGISTRIES = ["docker.io", "ghcr.io", "icr.io", "quay.io", "custom"];
 const CLOUD_PROVIDERS = ["IBM Cloud", "AWS", "Azure", "GCP", "On-prem"];
 const CIS_PROFILES = [
+  "Cyber Manager policy baseline",
   "CIS Docker Benchmark v1.6",
   "CIS Kubernetes Benchmark v1.8",
   "CIS IBM Cloud Foundations v1.0",
@@ -187,10 +195,12 @@ function NewScanPageInner() {
     cisProfile: "CIS Docker Benchmark v1.6",
     severityThreshold: "high",
     scanner: "trivy",
-    autoApproveBelow: "none",
+    autoApproveBelow: "high",
   });
 
-  const { permissions } = useAuth();
+  const [environmentMarkdown, setEnvironmentMarkdown] = useState("");
+  const [environmentFile, setEnvironmentFile] = useState("");
+  const [environmentError, setEnvironmentError] = useState("");
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [projectsError, setProjectsError] = useState("");
@@ -261,9 +271,10 @@ function NewScanPageInner() {
         imageRef: resolvedRef,
         projectId: form.projectId,
         cisProfile: form.cisProfile,
+        environmentMarkdown,
         severityThreshold: form.severityThreshold,
         scanner: form.scanner,
-        autoApproveBelow: permissions?.canApprove ? form.autoApproveBelow : "none",
+        autoApproveBelow: form.autoApproveBelow,
         // no trivyJson — backend runs Trivy itself
       });
       router.push(`/review?run=${run_id}`);
@@ -450,6 +461,29 @@ function NewScanPageInner() {
             </div>
           </SectionCard>
 
+          <SectionCard icon={<span aria-hidden="true">▤</span>} title="Environment & infrastructure" subtitle="Upload Markdown describing deployment, network exposure and security controls (maximum 100 KB).">
+            <label className="flex flex-col gap-3 text-[13px]">
+              <span>Environment description (.md)</span>
+              <input type="file" accept=".md,text/markdown" disabled={launching} onChange={async (event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (!file) return;
+                setEnvironmentMarkdown(""); setEnvironmentFile(""); setEnvironmentError("");
+                try {
+                  if (!file.name.toLowerCase().endsWith(".md") || file.size > 100_000) throw new Error("Choose a .md file no larger than 100 KB.");
+                  const text = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer());
+                  if (!text.trim()) throw new Error("The Markdown file is empty.");
+                  setEnvironmentMarkdown(text); setEnvironmentFile(file.name);
+                } catch (error) { setEnvironmentError(error instanceof Error ? error.message : "Unable to read file."); }
+              }} />
+            </label>
+            {environmentError && <p role="alert" className="text-[12px] mt-3" style={{ color: "var(--accent-red)" }}>{environmentError}</p>}
+            {environmentFile && <div className="mt-3 text-[12px]">
+              <div className="flex items-center justify-between gap-3"><span>{environmentFile}</span><button type="button" disabled={launching} onClick={() => { setEnvironmentMarkdown(""); setEnvironmentFile(""); }}>Remove</button></div>
+              <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap" style={{ color: "var(--subtle)" }}>{environmentMarkdown}</pre>
+            </div>}
+          </SectionCard>
+
           {/* ── 4. Scan Options ── */}
           <SectionCard
             icon={
@@ -550,15 +584,15 @@ function NewScanPageInner() {
                 </div>
               </div>
 
-              {/* Auto-approve */}
+              {/* Agentic auto-approval from published baselines */}
               <div>
-                <Label>Auto-approve below</Label>
+                <Label>Auto-approve from baselines</Label>
                 <div className="flex flex-col gap-2 mb-3">
-                  {(permissions?.canApprove ? ["none", "low", "medium"] as const : ["none"] as const).map((opt) => {
-                    const isSelected = form.autoApproveBelow === opt;
+                  {AUTO_APPROVE_OPTS.map((opt) => {
+                    const isSelected = form.autoApproveBelow === opt.value;
                     return (
                       <label
-                        key={opt}
+                        key={opt.value}
                         className="flex items-center gap-3 px-3 py-2 rounded-xl cursor-pointer"
                         style={{
                           background: isSelected ? "var(--accent-green-bg)" : "var(--surface2)",
@@ -569,9 +603,9 @@ function NewScanPageInner() {
                         <input
                           type="radio"
                           name="auto"
-                          value={opt}
+                          value={opt.value}
                           checked={isSelected}
-                          onChange={() => set("autoApproveBelow", opt)}
+                          onChange={() => set("autoApproveBelow", opt.value)}
                           className="hidden"
                           disabled={launching}
                         />
@@ -579,13 +613,8 @@ function NewScanPageInner() {
                           className="w-3.5 h-3.5 rounded-full flex-shrink-0"
                           style={{ background: isSelected ? "var(--accent-green)" : "var(--border2)" }}
                         />
-                        <div>
-                          <div
-                            className="text-[12px] font-semibold capitalize"
-                            style={{ color: isSelected ? "var(--accent-green)" : "var(--subtle)" }}
-                          >
-                            {opt === "none" ? "Off" : `${opt} severity`}
-                          </div>
+                        <div className="text-[12px] font-semibold" style={{ color: isSelected ? "var(--accent-green)" : "var(--subtle)" }}>
+                          {opt.label}
                         </div>
                       </label>
                     );
@@ -593,14 +622,10 @@ function NewScanPageInner() {
                 </div>
                 {form.autoApproveBelow !== "none" && (
                   <div
-                    className="flex items-start gap-2 p-2.5 rounded-lg text-[11px]"
-                    style={{
-                      background: "var(--accent-yellow-bg, rgba(210,153,34,0.08))",
-                      border: "1px solid rgba(210,153,34,0.2)",
-                      color: "var(--accent-yellow)",
-                    }}
+                    className="flex items-start gap-2 p-2.5 rounded-lg text-[11px] leading-relaxed"
+                    style={{ background: "var(--accent-green-bg)", border: "1px solid var(--accent-green-bdr)", color: "var(--accent-green)" }}
                   >
-                    ⚠ Findings below this threshold will be auto-approved without human review.
+                    ◈ The agent auto-approves findings at or below this severity that match a Cyber Manager–published baseline (same CVE &amp; package). Criticals and unmatched findings still go to human review, and every auto-approval is recorded in the finding&apos;s history.
                   </div>
                 )}
               </div>

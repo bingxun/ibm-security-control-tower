@@ -453,8 +453,16 @@ def get_dashboard_stats(project_ids: list[str] | None = None) -> dict:
                               FROM cves c JOIN runs r ON r.run_id=c.run_id WHERE {where}""", args).fetchone()
         total_cves, approved = row
         rate = round(approved / total_cves * 100) if total_cves else 0
+        # Findings the agent auto-approved from published baselines (audit rows the
+        # agent wrote). This quantifies the automation's impact on the dashboard.
+        try:
+            auto_approved = conn.execute(f"""SELECT COUNT(*) FROM review_audit a JOIN runs r ON r.run_id=a.run_id
+                WHERE {where} AND a.decision='approved' AND (a.reviewer LIKE 'Agent%' OR a.reviewer LIKE 'Control Tower%')""", args).fetchone()[0]
+        except Exception:
+            auto_approved = 0
         return {"totalScans": total_scans, "cvesTriaged": total_cves,
-                "avgApprovalRate": rate, "ragFirstPassRate": rate}
+                "avgApprovalRate": rate, "ragFirstPassRate": rate,
+                "autoApproved": auto_approved}
 
 
 def get_scan_summaries(limit: int = 50, project_ids: list[str] | None = None) -> list[dict]:
@@ -495,6 +503,7 @@ def get_scan_summaries(limit: int = 50, project_ids: list[str] | None = None) ->
                 "medium":    sum(1 for c in cves if c["severity"] == "medium"),
                 "approved":  sum(1 for c in cves if c["status"] == "approved"),
                 "rejected":  sum(1 for c in cves if c["status"] == "rejected"),
+                "changesRequested": sum(1 for c in cves if c["status"] == "changes_requested"),
                 "status":    run["status"],
                 "duration":  duration,
             })
@@ -675,10 +684,12 @@ def seed_admin(
     with get_conn() as conn:
         count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     if count == 0:
+        email = os.getenv("SUPER_ADMIN_EMAIL", email)
+        password = os.getenv("SUPER_ADMIN_PASSWORD", password)
         create_user(email=email, name=name, password=password, roles=["SUPER_ADMIN"])
         import logging
         logging.getLogger("control_tower").info(
-            "Seeded default admin: %s / %s", email, password
+            "Seeded default admin: %s", email
         )
 
 

@@ -1,0 +1,53 @@
+services:
+  - type: web
+    name: realhack-control-tower-api
+    runtime: docker
+    region: singapore
+    plan: starter
+    dockerfilePath: ./Dockerfile.api
+    dockerContext: .
+    healthCheckPath: /health
+    numInstances: 1
+    autoDeployTrigger: off
+    disk:
+      name: control-tower-data
+      mountPath: /app/data
+      sizeGB: 1
+    envVars:
+      - key: PORT
+        value: '8000'
+      - key: DB_PATH
+        value: /app/data/control_tower.db
+      - key: MILVUS_DB_PATH
+        value: /app/data/rag_memory.json
+      - key: SUPER_ADMIN_PASSWORD
+        generateValue: true
+      - key: ANTHROPIC_BASE_URL
+        sync: false
+      - key: ANTHROPIC_AUTH_TOKEN
+        sync: false
+      - key: RAD_MODEL
+        value: claude-sonnet-4-6
+      - key: WATSONX_API_KEY
+        sync: false
+      - key: WATSONX_PROJECT_ID
+        sync: false
+      - key: WATSONX_URL
+        value: https://jp-tok.ml.cloud.ibm.com
+  - type: web
+    name: realhack-control-tower
+    runtime: node
+    region: singapore
+    plan: free
+    rootDir: ui
+    buildCommand: npm install --no-audit --no-fund && npm run build
+    startCommand: npm run start -- --hostname 0.0.0.0 --port $PORT
+    healthCheckPath: /login
+    autoDeployTrigger: off
+    envVars:
+      - key: NODE_VERSION
+        value: '22'
+      - key: NEXT_TELEMETRY_DISABLED
+        value: '1'
+      - key: NEXT_PUBLIC_API_URL
+        sync: false

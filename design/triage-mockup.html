@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Autonomous Triage Agent — Design Mockup</title>
+<style>
+  :root{
+    --bg:#080b10; --bg-nav:#0d1117; --surface:#0d1117; --surface2:#161b22; --surface3:#0a0d12;
+    --border:#1e2530; --border2:#2a3441; --dim:#30363d; --muted:#4d5566; --subtle:#6e7681;
+    --faint:#8b949e; --body:#c9d1d9; --heading:#e6edf3;
+    --green:#3fb950; --green-bg:rgba(63,185,80,0.08); --green-bdr:rgba(63,185,80,0.25);
+    --red:#f85149; --red-bg:rgba(248,81,73,0.08); --red-bdr:rgba(248,81,73,0.3);
+    --orange:#f0883e; --yellow:#d29922;
+    --blue:#4493f8; --blue-bg:rgba(68,147,248,0.1);
+    --purple:#a371f7; --purple-bg:rgba(163,113,247,0.08); --purple-bdr:rgba(163,113,247,0.18);
+    --accept:#238636;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--body);-webkit-font-smoothing:antialiased;height:100vh;overflow:hidden}
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace}
+  .app{display:flex;flex-direction:column;height:100vh}
+
+  /* top nav */
+  .topnav{height:52px;flex-shrink:0;display:flex;align-items:center;gap:16px;padding:0 20px;
+    background:var(--bg-nav);border-bottom:1px solid var(--border)}
+  .logo{display:flex;align-items:center;gap:9px;font-weight:800;font-size:14px;color:var(--heading)}
+  .logo .dot{width:22px;height:22px;border-radius:7px;background:linear-gradient(135deg,var(--orange),var(--red));
+    display:flex;align-items:center;justify-content:center;font-size:12px}
+  .tabs{display:flex;gap:4px;margin-left:12px}
+  .tab{font-size:12.5px;padding:6px 12px;border-radius:8px;color:var(--muted);cursor:pointer}
+  .tab.active{background:var(--surface2);color:var(--heading)}
+  .spacer{flex:1}
+  .pill{font-size:11px;padding:5px 11px;border-radius:999px;background:var(--surface2);
+    color:var(--faint);border:1px solid var(--border)}
+  .avatar{width:28px;height:28px;border-radius:8px;background:rgba(240,136,62,0.15);color:var(--orange);
+    display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;border:1px solid var(--border2)}
+
+  .body{flex:1;display:flex;min-height:0}
+
+  /* left queue */
+  aside{width:238px;flex-shrink:0;display:flex;flex-direction:column;background:var(--bg-nav);
+    border-right:1px solid var(--border);overflow:hidden}
+  .qhead{padding:14px 14px 12px;border-bottom:1px solid var(--border)}
+  .qtitle{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+  .qtitle b{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  .qcount{font-size:11px;font-weight:700;padding:2px 7px;border-radius:6px;background:var(--surface2);
+    color:var(--subtle);border:1px solid var(--border)}
+  .lanehdr{font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+    padding:10px 14px 5px;display:flex;align-items:center;gap:7px}
+  .scroll{overflow-y:auto;flex:1;min-height:0;padding-bottom:8px}
+  .qitem{width:100%;text-align:left;display:flex;align-items:center;gap:9px;padding:7px 10px 7px 12px;
+    border-left:3px solid transparent;background:none;border-top:none;border-right:none;border-bottom:none;
+    color:inherit;cursor:pointer}
+  .qitem:hover{background:var(--surface)}
+  .qitem.sel{background:var(--surface2)}
+  .qitem .sev{width:6px;height:6px;border-radius:999px;flex-shrink:0}
+  .qitem .mid{flex:1;min-width:0}
+  .qitem .cid{font-size:11.5px;font-weight:600;line-height:1.2}
+  .qitem .pkg{font-size:10px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .vstat{font-size:12px;font-weight:800;flex-shrink:0}
+  .qfoot{border-top:1px solid var(--border);padding:10px 14px;display:grid;grid-template-columns:repeat(3,1fr);gap:4px;text-align:center}
+  .qfoot .n{font-size:14px;font-weight:900;line-height:1.1}
+  .qfoot .l{font-size:9px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+
+  /* main */
+  main{flex:1;min-height:0;overflow-y:auto;padding:22px 28px;display:flex;flex-direction:column;gap:18px;background:var(--bg)}
+
+  /* autonomy summary banner */
+  .summary{border-radius:16px;padding:18px 20px;background:linear-gradient(135deg,rgba(163,113,247,0.1),rgba(68,147,248,0.05));
+    border:1px solid var(--purple-bdr);display:flex;align-items:center;gap:22px}
+  .summary .big{font-size:30px;font-weight:900;line-height:1;color:var(--heading)}
+  .summary .lbl{font-size:11px;color:var(--subtle);margin-top:3px}
+  .summary .sep{width:1px;height:40px;background:var(--border2)}
+  .summary .accentgreen{color:var(--green)} .summary .accentyellow{color:var(--yellow)}
+  .summary .pulse{margin-left:auto;font-size:11px;color:var(--purple);display:flex;align-items:center;gap:7px}
+  .ring{width:8px;height:8px;border-radius:999px;background:var(--purple);box-shadow:0 0 7px var(--purple);animation:p 1.6s infinite}
+  @keyframes p{0%,100%{opacity:1}50%{opacity:.35}}
+
+  /* safety invariant strip */
+  .guard{border-radius:12px;padding:11px 15px;background:var(--red-bg);border:1px solid var(--red-bdr);
+    display:flex;align-items:center;gap:10px;font-size:12px;color:var(--body)}
+  .guard b{color:var(--red)}
+  .guard .ic{width:22px;height:22px;border-radius:6px;background:var(--red-bdr);color:var(--red);
+    display:flex;align-items:center;justify-content:center;flex-shrink:0}
+
+  .card{border-radius:16px;background:var(--surface);border:1px solid var(--border);overflow:hidden}
+  .chead{display:flex;align-items:center;gap:12px;padding:16px 22px;border-bottom:1px solid var(--border)}
+  .cvss{width:72px;height:72px;border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;flex-shrink:0}
+  .cvss .v{font-size:27px;font-weight:900;line-height:1}
+  .cvss .t{font-size:10px;font-weight:800;letter-spacing:.12em;margin-top:2px}
+  h1{font-size:21px;font-weight:900;letter-spacing:-.01em;color:var(--heading)}
+  .badge{font-size:11px;font-weight:800;padding:3px 11px;border-radius:999px;text-transform:uppercase;letter-spacing:.03em}
+  .sub{font-size:13px;color:var(--subtle);margin-top:3px}
+
+  /* verdict block */
+  .verdict{display:flex;align-items:center;gap:16px;padding:18px 22px;border-bottom:1px solid var(--border);background:var(--surface3)}
+  .vbadge{font-size:13px;font-weight:900;padding:9px 16px;border-radius:12px;display:flex;align-items:center;gap:8px;text-transform:uppercase;letter-spacing:.03em}
+  .conf{flex:1}
+  .conf .row{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:5px}
+  .meter{height:7px;border-radius:999px;background:var(--border);overflow:hidden}
+  .meter > span{display:block;height:100%;border-radius:999px}
+
+  /* evidence grid */
+  .evid{padding:18px 22px;display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .ecell{border-radius:12px;padding:13px 14px;background:var(--surface2);border:1px solid var(--border)}
+  .ecell .k{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:6px}
+  .ecell .v{font-size:19px;font-weight:900;margin-top:7px;line-height:1}
+  .ecell .d{font-size:10.5px;color:var(--subtle);margin-top:4px;line-height:1.35}
+  .toolchip{font-size:9px;font-weight:700;padding:1px 6px;border-radius:999px;background:rgba(210,153,34,0.14);color:var(--yellow)}
+
+  /* reasoning / tool trace */
+  .trace{padding:4px 22px 20px}
+  .trace h3{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin:16px 0 12px}
+  .step{display:flex;gap:14px}
+  .step .gut{display:flex;flex-direction:column;align-items:center}
+  .step .node{width:26px;height:26px;border-radius:999px;display:flex;align-items:center;justify-content:center;
+    font-size:11px;font-weight:800;flex-shrink:0;z-index:1}
+  .step .line{width:1px;flex:1;min-height:14px;margin:3px 0}
+  .step .c{flex:1;padding-bottom:14px}
+  .step .ti{font-size:13px;font-weight:700;color:var(--faint)}
+  .step .de{font-size:12px;color:var(--muted);margin-top:2px;line-height:1.5}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .chip{font-size:10px;font-weight:600;padding:2px 8px;border-radius:999px}
+  .c-tool{background:rgba(210,153,34,0.14);color:var(--yellow)}
+  .c-rag{background:var(--purple-bdr);color:var(--purple)}
+  .c-llm{background:rgba(68,147,248,0.14);color:var(--blue)}
+  .c-done{background:rgba(63,185,80,0.14);color:var(--green)}
+  .c-warn{background:var(--red-bg);color:var(--red)}
+
+  /* action row */
+  .actions{display:flex;align-items:center;gap:12px;padding:18px 22px;border-top:1px solid var(--border);background:var(--surface3)}
+  .btn{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:800;padding:11px 26px;border-radius:12px;border:none;cursor:pointer}
+  .btn.accept{background:var(--accept);color:#fff;box-shadow:0 0 20px rgba(35,134,54,0.3)}
+  .btn.sec{background:var(--surface2);color:var(--faint);border:1px solid var(--border2);font-weight:700;padding:11px 20px}
+  .btn.rej{background:var(--red-bg);color:var(--red);border:1px solid var(--red-bdr);font-weight:700;padding:11px 20px}
+  .prog{margin-left:auto;text-align:right}
+  .prog .n{font-size:13px;font-weight:700;color:var(--heading)}
+  .prog .l{font-size:11px;color:var(--muted)}
+
+  .autoNote{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--green);
+    background:var(--green-bg);border:1px solid var(--green-bdr);padding:10px 15px;border-radius:12px}
+
+  .hint{text-align:center;font-size:11px;color:var(--muted);padding:2px 0 6px}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- top nav -->
+  <div class="topnav">
+    <div class="logo"><span class="dot">🛡</span> Control Tower</div>
+    <div class="tabs">
+      <div class="tab">Dashboard</div>
+      <div class="tab active">Triage</div>
+      <div class="tab">Scans</div>
+      <div class="tab">Settings</div>
+    </div>
+    <div class="spacer"></div>
+    <span class="pill mono">CLOUD-247 · api-gateway:2.4.1</span>
+    <span class="pill" style="color:var(--purple);border-color:var(--purple-bdr)">⚡ Autonomy: Guarded</span>
+    <div class="avatar">TF</div>
+  </div>
+
+  <div class="body">
+    <!-- left queue -->
+    <aside>
+      <div class="qhead">
+        <div class="qtitle"><b>Triage Queue</b><span class="qcount mono">15</span></div>
+        <div style="display:flex;gap:6px">
+          <span class="chip c-warn">C 3</span>
+          <span class="chip" style="background:rgba(240,136,62,0.12);color:var(--orange)">H 5</span>
+          <span class="chip" style="background:rgba(210,153,34,0.1);color:var(--yellow)">M 4</span>
+          <span class="chip c-done">L 3</span>
+        </div>
+      </div>
+      <div class="scroll" id="queue"></div>
+      <div class="qfoot">
+        <div><div class="n" style="color:var(--green)">11</div><div class="l">Auto</div></div>
+        <div><div class="n" style="color:var(--yellow)">4</div><div class="l">Escalated</div></div>
+        <div><div class="n" style="color:var(--subtle)">0</div><div class="l">Left</div></div>
+      </div>
+    </aside>
+
+    <!-- main -->
+    <main>
+      <!-- autonomy summary -->
+      <div class="summary">
+        <div><div class="big accentgreen">11<span style="font-size:17px;color:var(--muted)">/15</span></div><div class="lbl">Auto-resolved by agent</div></div>
+        <div class="sep"></div>
+        <div><div class="big accentyellow">4</div><div class="lbl">Escalated to you</div></div>
+        <div class="sep"></div>
+        <div><div class="big">~52<span style="font-size:17px;color:var(--muted)">min</span></div><div class="lbl">Review time saved</div></div>
+        <div class="pulse"><span class="ring"></span> Agent reasoning · 4 tools</div>
+      </div>
+
+      <!-- safety invariant -->
+      <div class="guard">
+        <span class="ic">🔒</span>
+        <div><b>Safety invariant active.</b> The agent may never auto-approve a CISA&nbsp;KEV-listed or network-reachable critical CVE — these are always forced to human review, regardless of confidence.</div>
+      </div>
+
+      <!-- selected CVE triage card -->
+      <div class="card" id="detail"></div>
+      <div class="hint">◀ Click any CVE in the queue to see how the agent decided · green = auto-resolved, pulsing = escalated to you</div>
+    </main>
+  </div>
+</div>
+
+<script>
+const CVES = [
+  {
+    id:"CVE-2024-3094", pkg:"xz-utils", ver:"5.6.0", fix:"5.6.2", cvss:10.0, sev:"critical",
+    desc:"Malicious backdoor in liblzma enabling SSH remote code execution.",
+    vector:"Network", auth:"None",
+    epss:94, kev:true, reach:true, mem:null,
+    verdict:"ESCALATE", vcolor:"--red", conf:98,
+    forced:"CISA KEV — known exploited in the wild",
+    trace:[
+      {s:"done",t:"query_memory",d:"No prior decision for this advisory on CLOUD-247.",ch:[["◈ query_memory","c-rag"],["no match","c-rag"]]},
+      {s:"warn",t:"check_kev — CISA Known Exploited catalog",d:"MATCH. CVE-2024-3094 is on the CISA KEV list (added 2024-03-29). Active exploitation confirmed.",ch:[["⚒ check_kev","c-tool"],["KEV HIT","c-warn"]]},
+      {s:"warn",t:"score_epss — exploit prediction",d:"EPSS 0.94 (94th percentile). Very high probability of exploitation within 30 days.",ch:[["⚒ score_epss","c-tool"],["0.94","c-warn"]]},
+      {s:"warn",t:"check_reachability",d:"liblzma is loaded by the sshd service in this image — vulnerable code path is reachable.",ch:[["⚒ reachability","c-tool"],["reachable","c-warn"]]},
+      {s:"done",t:"Verdict — ESCALATE (forced)",d:"Safety invariant triggered: KEV + reachable critical. Routed to human gate with evidence attached. Confidence 98%.",ch:[["forced escalate","c-warn"]]},
+    ],
+  },
+  {
+    id:"CVE-2023-45853", pkg:"zlib", ver:"1.2.13", fix:"1.3", cvss:9.8, sev:"critical",
+    desc:"Integer overflow in MiniZip via a crafted ZIP archive.",
+    vector:"Network", auth:"None",
+    epss:7, kev:false, reach:false, mem:92,
+    verdict:"ESCALATE", vcolor:"--yellow", conf:71,
+    forced:null,
+    trace:[
+      {s:"done",t:"query_memory",d:"92% match: a Cyber Manager accepted the same finding on CLOUD-118 (MiniZip not compiled in).",ch:[["◈ query_memory","c-rag"],["92% hit","c-rag"]]},
+      {s:"done",t:"score_epss",d:"EPSS 0.07 — low real-world exploitation likelihood.",ch:[["⚒ score_epss","c-tool"],["0.07","c-done"]]},
+      {s:"done",t:"check_kev",d:"Not on the CISA KEV catalog.",ch:[["⚒ check_kev","c-tool"],["clear","c-done"]]},
+      {s:"done",t:"check_reachability",d:"MiniZip symbols not present in the image — vulnerable path not reachable.",ch:[["⚒ reachability","c-tool"],["unreachable","c-done"]]},
+      {s:"done",t:"Verdict — ESCALATE (low confidence)",d:"Evidence favors accept, but CVSS 9.8 is above the auto-clear ceiling for criticals. Surfaced for a fast human confirm. Confidence 71%.",ch:[["policy ceiling","c-tool"]]},
+    ],
+  },
+  {
+    id:"CVE-2024-28182", pkg:"nghttp2", ver:"1.57.0", fix:"1.61.0", cvss:7.5, sev:"high",
+    desc:"HTTP/2 CONTINUATION flood leading to denial of service.",
+    vector:"Network", auth:"None",
+    epss:12, kev:false, reach:true, mem:68,
+    verdict:"ESCALATE", vcolor:"--yellow", conf:64,
+    forced:null,
+    trace:[
+      {s:"done",t:"query_memory",d:"68% match — related DoS finding, mixed prior outcomes.",ch:[["◈ query_memory","c-rag"],["68% hit","c-rag"]]},
+      {s:"done",t:"score_epss",d:"EPSS 0.12 — moderate.",ch:[["⚒ score_epss","c-tool"],["0.12","c-done"]]},
+      {s:"done",t:"check_reachability",d:"HTTP/2 is enabled on the gateway — path reachable.",ch:[["⚒ reachability","c-tool"],["reachable","c-warn"]]},
+      {s:"done",t:"Verdict — ESCALATE",d:"Reachable network DoS with no strong memory precedent. Confidence 64%.",ch:[["low confidence","c-tool"]]},
+    ],
+  },
+  {
+    id:"CVE-2023-39804", pkg:"tar", ver:"1.34", fix:"1.35", cvss:5.5, sev:"medium",
+    desc:"NULL pointer dereference via crafted tar archive extended headers.",
+    vector:"Local", auth:"Required",
+    epss:2, kev:false, reach:true, mem:88,
+    verdict:"ESCALATE", vcolor:"--yellow", conf:70,
+    forced:null,
+    trace:[
+      {s:"done",t:"query_memory",d:"88% match — prior accept, but under a different CIS profile.",ch:[["◈ query_memory","c-rag"],["88% hit","c-rag"]]},
+      {s:"done",t:"Verdict — ESCALATE",d:"Memory precedent differs on CIS profile; routing to human to confirm applicability. Confidence 70%.",ch:[["profile mismatch","c-tool"]]},
+    ],
+  },
+  // ── auto-resolved ──
+  {
+    id:"CVE-2022-48174", pkg:"busybox", ver:"1.36.1", fix:"1.37.0", cvss:9.8, sev:"critical",
+    desc:"Stack overflow in ash shell — reachable only via local interactive shell.",
+    vector:"Local", auth:"Required",
+    epss:1, kev:false, reach:false, mem:95,
+    verdict:"AUTO-ACCEPT", vcolor:"--green", conf:93,
+    forced:null,
+    trace:[
+      {s:"done",t:"query_memory",d:"95% match: accepted on CLOUD-247 last month — no interactive shell in prod image.",ch:[["◈ query_memory","c-rag"],["95% hit","c-rag"]]},
+      {s:"done",t:"score_epss",d:"EPSS 0.01 — negligible.",ch:[["⚒ score_epss","c-tool"],["0.01","c-done"]]},
+      {s:"done",t:"check_kev",d:"Not on CISA KEV.",ch:[["⚒ check_kev","c-tool"],["clear","c-done"]]},
+      {s:"done",t:"check_reachability",d:"ash shell not invoked by any service — local-only vector, auth required, unreachable.",ch:[["⚒ reachability","c-tool"],["unreachable","c-done"]]},
+      {s:"done",t:"draft_rationale (Claude)",d:"Generated accepted-risk justification grounded in the 95% memory match.",ch:[["✦ claude","c-llm"],["0.8s","c-done"]]},
+      {s:"done",t:"Verdict — AUTO-ACCEPT",d:"All signals low + strong precedent + not reachable. Auto-resolved within guardrails. Confidence 93%.",ch:[["auto-resolved","c-done"]]},
+    ],
+  },
+  {
+    id:"CVE-2021-33560", pkg:"libgcrypt", ver:"1.9.4", fix:"1.9.5", cvss:7.5, sev:"high",
+    desc:"Mishandled ElGamal encryption, Marvin side-channel.",
+    vector:"Network", auth:"Required",
+    epss:3, kev:false, reach:false, mem:90,
+    verdict:"AUTO-ACCEPT", vcolor:"--green", conf:91,
+    forced:null,
+    trace:[
+      {s:"done",t:"query_memory",d:"90% match — accepted org-wide (ElGamal not used).",ch:[["◈ query_memory","c-rag"],["90% hit","c-rag"]]},
+      {s:"done",t:"score_epss",d:"EPSS 0.03.",ch:[["⚒ score_epss","c-tool"],["0.03","c-done"]]},
+      {s:"done",t:"Verdict — AUTO-ACCEPT",d:"Low EPSS, not KEV, strong precedent. Confidence 91%.",ch:[["auto-resolved","c-done"]]},
+    ],
+  },
+];
+// pad the auto lane visually
+const AUTO_EXTRA = [
+  {id:"CVE-2023-29491",pkg:"ncurses",cvss:7.8,sev:"high",verdict:"AUTO-ACCEPT",vcolor:"--green"},
+  {id:"CVE-2022-3715",pkg:"bash",cvss:7.8,sev:"high",verdict:"AUTO-ACCEPT",vcolor:"--green"},
+  {id:"CVE-2023-4911",pkg:"glibc",cvss:7.8,sev:"high",verdict:"AUTO-ACCEPT",vcolor:"--green"},
+  {id:"CVE-2024-0450",pkg:"python3",cvss:5.3,sev:"medium",verdict:"AUTO-ACCEPT",vcolor:"--green"},
+  {id:"CVE-2023-5678",pkg:"openssl",cvss:5.3,sev:"medium",verdict:"AUTO-ACCEPT",vcolor:"--green"},
+  {id:"CVE-2023-6246",pkg:"glibc",cvss:4.3,sev:"medium",verdict:"AUTO-ACCEPT",vcolor:"--green"},
+  {id:"CVE-2022-4899",pkg:"zstd",cvss:3.3,sev:"low",verdict:"AUTO-ACCEPT",vcolor:"--green"},
+  {id:"CVE-2023-50495",pkg:"ncurses",cvss:3.1,sev:"low",verdict:"AUTO-ACCEPT",vcolor:"--green"},
+  {id:"CVE-2024-26461",pkg:"krb5",cvss:2.9,sev:"low",verdict:"AUTO-ACCEPT",vcolor:"--green"},
+];
+
+const SEVC={critical:"--red",high:"--orange",medium:"--yellow",low:"--green"};
+const v=n=>`var(${n})`;
+
+function statIcon(cve){
+  if(cve.verdict==="AUTO-ACCEPT") return `<span class="vstat" style="color:var(--green)">✓</span>`;
+  return `<span class="vstat" style="color:var(--yellow)">◉</span>`;
+}
+
+function renderQueue(selId){
+  const esc = CVES.filter(c=>c.verdict==="ESCALATE");
+  const auto = CVES.filter(c=>c.verdict==="AUTO-ACCEPT").concat(AUTO_EXTRA);
+  const item=(c,sel)=>`
+    <button class="qitem ${sel?'sel':''}" onclick="select('${c.id}')" style="border-left-color:${sel?v(SEVC[c.sev]):'transparent'}">
+      <span class="sev" style="background:${v(SEVC[c.sev])}"></span>
+      <span class="mid"><span class="cid mono" style="color:${sel?'var(--heading)':'var(--body)'}">${c.id}</span>
+        <span class="pkg">${c.pkg}<span style="color:${v(SEVC[c.sev])}"> · ${c.cvss}</span></span></span>
+      ${statIcon(c)}
+    </button>`;
+  document.getElementById('queue').innerHTML =
+    `<div class="lanehdr" style="color:var(--yellow)"><span class="ring" style="background:var(--yellow);box-shadow:0 0 7px var(--yellow)"></span> Escalated to you · ${esc.length}</div>`
+    + esc.map(c=>item(c,c.id===selId)).join('')
+    + `<div class="lanehdr" style="color:var(--green)">✓ Auto-resolved · ${auto.length}</div>`
+    + auto.map(c=>item(c,c.id===selId)).join('');
+}
+
+function renderDetail(c){
+  const cvssColor = c.cvss>=9?"--red":c.cvss>=7?"--orange":c.cvss>=4?"--yellow":"--green";
+  const sevColor = SEVC[c.sev];
+  const auto = c.verdict==="AUTO-ACCEPT";
+  const evCell=(k,tool,val,valc,d)=>`
+    <div class="ecell">
+      <div class="k">${k} ${tool?`<span class="toolchip">${tool}</span>`:''}</div>
+      <div class="v" style="color:${valc}">${val}</div>
+      <div class="d">${d}</div>
+    </div>`;
+  const kevVal = c.kev?`<span style="color:var(--red)">LISTED</span>`:`<span style="color:var(--green)">clear</span>`;
+  const reachVal = c.reach?`<span style="color:var(--red)">yes</span>`:`<span style="color:var(--green)">no</span>`;
+  const memVal = c.mem?`${c.mem}%`:`—`;
+
+  const trace = c.trace.map((s,i)=>`
+    <div class="step">
+      <div class="gut">
+        <div class="node" style="${s.s==='done'?'background:var(--green);color:var(--surface)':s.s==='warn'?'background:var(--red-bdr);color:var(--red);border:1px solid var(--red-bdr)':'background:var(--surface2);color:var(--dim);border:1px solid var(--border)'}">${s.s==='warn'?'!':'✓'}</div>
+        ${i<c.trace.length-1?`<div class="line" style="background:${s.s==='warn'?'var(--red-bdr)':'var(--green)'}"></div>`:''}
+      </div>
+      <div class="c">
+        <div class="ti">${s.t}</div>
+        <div class="de">${s.d}</div>
+        <div class="chips">${s.ch.map(([l,cl])=>`<span class="chip ${cl}">${l}</span>`).join('')}</div>
+      </div>
+    </div>`).join('');
+
+  document.getElementById('detail').innerHTML = `
+    <div class="chead">
+      <div class="cvss" style="background:${v(cvssColor)}14;border:1px solid ${v(cvssColor)}33">
+        <span class="v" style="color:${v(cvssColor)}">${c.cvss}</span><span class="t" style="color:${v(cvssColor)}99">CVSS</span>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <h1 class="mono">${c.id}</h1>
+          <span class="badge" style="background:${v(sevColor)}1f;color:${v(sevColor)};border:1px solid ${v(sevColor)}33">${c.sev}</span>
+        </div>
+        <div class="sub"><span style="color:var(--body)">${c.pkg}</span> · v${c.ver} <span style="color:var(--dim)">→</span> <span style="color:var(--green)">fix: ${c.fix}</span></div>
+        <div class="sub" style="color:var(--muted)">${c.desc}</div>
+      </div>
+    </div>
+
+    <!-- verdict -->
+    <div class="verdict">
+      <div class="vbadge" style="background:${v(c.vcolor)}1f;color:${v(c.vcolor)};border:1px solid ${v(c.vcolor)}44">
+        ${auto?'✓ AUTO-ACCEPT':'◉ ESCALATE'}
+      </div>
+      <div class="conf">
+        <div class="row"><span>Agent confidence</span><span style="color:${v(c.vcolor)};font-weight:700">${c.conf}%</span></div>
+        <div class="meter"><span style="width:${c.conf}%;background:${v(c.vcolor)}"></span></div>
+      </div>
+      ${c.forced?`<div class="chip c-warn" style="font-size:11px;padding:6px 12px">🔒 Forced: ${c.forced}</div>`:''}
+    </div>
+
+    <!-- evidence -->
+    <div class="evid">
+      ${evCell('EPSS','score_epss',c.epss+'%', c.epss>=50?'var(--red)':c.epss>=15?'var(--yellow)':'var(--green)', (c.epss>=50?'High':c.epss>=15?'Moderate':'Low')+' exploit likelihood')}
+      ${evCell('CISA KEV','check_kev',kevVal,'', c.kev?'Known exploited in the wild':'Not a known-exploited CVE')}
+      ${evCell('Reachability','analyze',reachVal,'', c.reach?'Vulnerable path is loaded':'Vulnerable path not loaded')}
+      ${evCell('Memory','query_memory',memVal, c.mem?'var(--purple)':'var(--dim)', c.mem?'Prior human decision found':'No prior precedent')}
+    </div>
+
+    <!-- reasoning trace -->
+    <div class="trace">
+      <h3>Agent reasoning — autonomous tool calls</h3>
+      ${trace}
+    </div>
+
+    <!-- actions -->
+    <div class="actions">
+      ${auto
+        ? `<div class="autoNote">✓ Resolved autonomously by the agent — no human action required. You can override below if needed.</div>
+           <button class="btn sec">Override</button>`
+        : `<button class="btn accept">✓ Accept</button>
+           <button class="btn sec">✎ Add Notes</button>
+           <button class="btn rej">✕ Reject</button>`}
+      <div class="prog">
+        <div class="n">${auto?'auto':'needs review'}</div>
+        <div class="l">${auto?'0 min of your time':'~15 sec with evidence'}</div>
+      </div>
+    </div>`;
+}
+
+let current = "CVE-2024-3094";
+function select(id){ current=id; renderQueue(id); renderDetail(CVES.find(c=>c.id===id)); }
+select(current);
+</script>
+</body>
+</html>

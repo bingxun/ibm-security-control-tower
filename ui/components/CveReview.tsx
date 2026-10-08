@@ -1,22 +1,27 @@
 "use client";
 
-import { useState } from "react";
-import { CveRecord, cveKey } from "@/lib/types";
+import { useEffect, useState } from "react";
+import { CveRecord, cveKey, DecisionExtra, ReviewSuggestion, RevisionRecord } from "@/lib/types";
 import { AgentStep } from "@/lib/types";
+import BaselinePublisher from "./BaselinePublisher";
 import AgentDrawer from "./AgentDrawer";
+import ReviewAssistant from "./ReviewAssistant";
+import RevisionTimeline from "./RevisionTimeline";
+import { getRevisions } from "@/lib/api";
 import { usePermission, useAuth } from "@/lib/auth";
 import { ROLE_LABELS, UserRole } from "@/lib/types";
 
+type Decision = "approved" | "rejected" | "submitted" | "changes_requested";
+
 interface Props {
+  runId?: string;
   cve: CveRecord;
   agentSteps: AgentStep[];
   tokenFragment: string;
   totalCves: number;
   reviewedCount: number;
   approvedCount: number;
-  onDecision: (id: string, decision: "approved" | "rejected" | "submitted", editedRationale?: string, pkg?: string, editedByRole?: string) => void;
-  /** DevOps: save a note locally for this CVE (sent with its submit). */
-  onSaveNotes?: (cveKey: string, notes: string) => void;
+  onDecision: (id: string, decision: Decision, pkg?: string, extra?: DecisionExtra) => void;
 }
 
 const SEV_COLOR: Record<string, string> = {
@@ -33,685 +38,423 @@ const SEV_BG: Record<string, string> = {
   low:      "var(--accent-green-bg)",
 };
 
-// Marker embedded in old-format `rationale` strings, before the backend
-// started sending `remediation` as its own field. Case-insensitive.
-const LEGACY_REMEDIATION_MARKER = /recommended remediation:/i;
-
-/**
- * Splits an old-format `rationale` string (one that still has the fix
- * instruction embedded inline) into its Justification and Remediation
- * parts. Used only when `cve.remediation` is empty — new-format records
- * already come pre-split from the backend.
- */
-function splitLegacyRationale(rationale: string): { justification: string; remediation: string | null } {
-  const match = LEGACY_REMEDIATION_MARKER.exec(rationale);
-  if (!match) {
-    return { justification: rationale, remediation: null };
-  }
-  const justification = rationale.slice(0, match.index).trim();
-  const remediation = rationale.slice(match.index + match[0].length).trim();
-  return { justification, remediation: remediation.length > 0 ? remediation : null };
-}
-
-// ── Edit Modal ─────────────────────────────────────────────────────────────
-function EditModal({
-  cve,
-  onCancel,
-  onAccept,
-  notesOnly = false,
-}: {
+// ── Reject & request changes modal ──────────────────────────────────────────
+function RejectModal({ cve, onCancel, onConfirm }: {
   cve: CveRecord;
   onCancel: () => void;
-  onAccept: (notes: string) => void;
-  /** When true, the modal only saves notes (no approval) — used by DevOps. */
-  notesOnly?: boolean;
+  onConfirm: (reason: string, requested: string) => void;
 }) {
-  const [draft, setDraft] = useState(cve.manualNotes ?? "");
+  const [reason, setReason] = useState("");
+  const [requested, setRequested] = useState("");
+  const ready = reason.trim().length > 0 && requested.trim().length > 0;
 
   return (
-    /* Backdrop */
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-6"
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-6"
       style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
-    >
-      <div
-        className="w-full max-w-2xl rounded-2xl overflow-hidden"
-        style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
-      >
-        {/* Header */}
-        <div
-          className="flex items-center justify-between px-6 py-4"
-          style={{ borderBottom: "1px solid var(--border)" }}
-        >
+      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="w-full max-w-2xl rounded-2xl overflow-hidden" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+        <div className="px-6 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
+          <p className="text-[14px] font-bold" style={{ color: "var(--heading)" }}>Reject &amp; request changes</p>
+          <p className="text-[11px] mt-0.5" style={{ color: "var(--muted)" }}>{cve.id} · {cve.pkg} — this returns the finding to DevOps for revision.</p>
+        </div>
+        <div className="px-6 py-5 flex flex-col gap-4">
           <div>
-            <p className="text-[14px] font-bold" style={{ color: "var(--heading)" }}>
-              Add Manual Notes
-            </p>
-            <p className="text-[11px] mt-0.5" style={{ color: "var(--muted)" }}>
-              {cve.id} · {cve.pkg} {cve.version}
-            </p>
+            <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--muted)" }}>Reason for rejection</label>
+            <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3}
+              className="w-full px-4 py-3 rounded-xl text-[13px] leading-relaxed outline-none resize-none"
+              style={{ background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--body)" }}
+              placeholder="Why this cannot be approved as written…" />
           </div>
-          <button
-            onClick={onCancel}
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-[13px] transition-colors"
-            style={{ background: "var(--surface2)", color: "var(--muted)" }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface3)")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "var(--surface2)")}
-          >
-            ✕
-          </button>
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--muted)" }}>What DevOps must provide</label>
+            <textarea value={requested} onChange={(e) => setRequested(e.target.value)} rows={3}
+              className="w-full px-4 py-3 rounded-xl text-[13px] leading-relaxed outline-none resize-none"
+              style={{ background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--body)" }}
+              placeholder="The specific evidence or changes required to resubmit…" />
+          </div>
         </div>
-
-        {/* Textarea */}
-        <div className="px-6 py-5">
-          <label
-            className="block text-[11px] font-semibold uppercase tracking-wider mb-2"
-            style={{ color: "var(--muted)" }}
-          >
-            Your Remarks
-          </label>
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            rows={8}
-            className="w-full px-4 py-3 rounded-xl text-[13px] leading-relaxed outline-none resize-none"
-            style={{
-              background: "var(--surface2)",
-              border: "1px solid var(--border)",
-              color: "var(--body)",
-            }}
-            onFocus={(e) => (e.target.style.borderColor = "var(--accent-blue)")}
-            onBlur={(e) => (e.target.style.borderColor = "var(--border)")}
-            placeholder="Add your remarks or comments here…"
-          />
-          <p className="text-[11px] mt-2" style={{ color: "var(--muted)" }}>
-            {draft.length} characters · These notes are stored separately from the AI-generated justification and remediation.
-          </p>
-        </div>
-
-        {/* Actions */}
-        <div
-          className="flex items-center gap-3 px-6 py-4"
-          style={{ borderTop: "1px solid var(--border)", background: "var(--surface3)" }}
-        >
-          <button
-            onClick={() => onAccept(draft)}
-            disabled={!draft.trim()}
-            className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-[13px] font-bold transition-all"
-            style={{
-              background: draft.trim() ? "var(--btn-accept-bg)" : "var(--surface2)",
-              color: draft.trim() ? "var(--btn-accept-text)" : "var(--dim)",
-              boxShadow: draft.trim() ? "0 0 16px var(--btn-accept-glow)" : "none",
-              cursor: draft.trim() ? "pointer" : "not-allowed",
-            }}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-            {notesOnly ? "Save notes" : "Save notes & accept"}
+        <div className="flex items-center gap-3 px-6 py-4" style={{ borderTop: "1px solid var(--border)", background: "var(--surface3)" }}>
+          <button onClick={() => onConfirm(reason, requested)} disabled={!ready}
+            className="px-6 py-2.5 rounded-xl text-[13px] font-bold transition-all"
+            style={{ background: ready ? "var(--accent-red-bg)" : "var(--surface2)", color: ready ? "var(--accent-red)" : "var(--dim)",
+              border: `1px solid ${ready ? "var(--accent-red-bdr)" : "var(--border)"}`, cursor: ready ? "pointer" : "not-allowed" }}>
+            Reject &amp; request changes
           </button>
-          <button
-            onClick={onCancel}
-            className="px-5 py-2.5 rounded-xl text-[13px] font-semibold transition-opacity hover:opacity-80"
-            style={{
-              background: "var(--surface2)",
-              color: "var(--faint)",
-              border: "1px solid var(--border2)",
-            }}
-          >
-            Cancel
-          </button>
+          <button onClick={onCancel} className="px-5 py-2.5 rounded-xl text-[13px] font-semibold hover:opacity-80"
+            style={{ background: "var(--surface2)", color: "var(--faint)", border: "1px solid var(--border2)" }}>Cancel</button>
         </div>
       </div>
     </div>
   );
 }
 
+// ── Editable draft field ─────────────────────────────────────────────────────
+function DraftField({ label, color, value, onChange, placeholder }: {
+  label: string; color: string; value: string; onChange: (v: string) => void; placeholder: string;
+}) {
+  return (
+    <div className="pl-4" style={{ borderLeft: `2px solid ${color}` }}>
+      <div className="text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color }}>{label}</div>
+      <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={3}
+        className="w-full px-3 py-2 rounded-xl text-[14px] leading-[1.7] outline-none resize-y"
+        style={{ background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--body)" }}
+        placeholder={placeholder} />
+    </div>
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────────────
 export default function CveReview({
-  cve,
-  agentSteps,
-  tokenFragment,
-  totalCves,
-  reviewedCount,
-  approvedCount,
-  onDecision,
-  onSaveNotes,
+  runId, cve, agentSteps, tokenFragment, totalCves, reviewedCount, approvedCount, onDecision,
 }: Props) {
-  const [editOpen, setEditOpen] = useState(false);
   const canApprove            = usePermission("canApprove");
   const canReject             = usePermission("canReject");
   const canSubmitForApproval  = usePermission("canSubmitForApproval");
   const canApproveSubmitted   = usePermission("canApproveSubmitted");
-  const { user }    = useAuth();
+  const { user } = useAuth();
 
   const isSubmitted = cve.status === "submitted";
-  // DevOps uses the notes-only modal; it has no approve capability of its own.
-  const notesOnly = canSubmitForApproval && !canApprove;
+  const isTerminal = cve.status === "approved" || cve.status === "rejected";
+  const isDraftState = cve.status === "pending" || cve.status === "changes_requested";
+  // Anyone who can submit (DevOps, Super Admin) prepares & submits an unsubmitted finding.
+  const editable = canSubmitForApproval && isDraftState;
+
+  const [draft, setDraft] = useState({
+    justification: cve.rationale ?? "",
+    remediation: cve.remediation ?? "",
+    notes: cve.manualNotes ?? "",
+  });
+  const [appliedIds, setAppliedIds] = useState<string[]>([]);
+  const [reviewComment, setReviewComment] = useState("");
+  const [showAssistant, setShowAssistant] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [revisions, setRevisions] = useState<RevisionRecord[]>([]);
+
+  // Load (and refresh after any decision) the finding's revision history.
+  useEffect(() => {
+    if (!runId) return;
+    let cancelled = false;
+    getRevisions(runId, cve.id, cve.pkg)
+      .then((rows) => { if (!cancelled) setRevisions(rows); })
+      .catch(() => { if (!cancelled) setRevisions([]); });
+    return () => { cancelled = true; };
+  }, [runId, cve.id, cve.pkg, cve.status]);
+
+  const assistantMode: "draft" | "review" = editable ? "draft" : "review";
+  const applySuggestion = (s: ReviewSuggestion) => {
+    if (assistantMode === "review") {
+      setReviewComment((prev) => (prev ? `${prev}\n${s.suggestedText ?? ""}` : s.suggestedText ?? ""));
+    } else if (s.type !== "review_comment" && s.suggestedText) {
+      setDraft((d) => ({ ...d, justification: s.suggestedText as string }));
+    }
+    setAppliedIds((ids) => (ids.includes(s.id) ? ids : [...ids, s.id]));
+  };
 
   const sevColor = SEV_COLOR[cve.severity] ?? "var(--faint)";
   const cvssColor =
     cve.cvss >= 9 ? "var(--accent-red)" :
     cve.cvss >= 7 ? "var(--accent-orange)" :
-    cve.cvss >= 4 ? "var(--accent-yellow)" :
-                    "var(--accent-green)";
+    cve.cvss >= 4 ? "var(--accent-yellow)" : "var(--accent-green)";
 
   const isStub = cve.rationale?.startsWith("[Auto-generated stub");
-  const displayRationale = isStub
-    ? cve.rationale.replace(/^\[Auto-generated stub[^\]]*\]\s*/, "")
-    : cve.rationale;
-
-  // New-format records come pre-split from the backend (`remediation` is a
-  // clean, separate field). Old-format records still have the remediation
-  // instruction embedded inside `rationale` — fall back to splitting it out.
-  const hasCleanRemediation = !!cve.remediation && cve.remediation.trim().length > 0;
-  const legacySplit = !hasCleanRemediation && displayRationale ? splitLegacyRationale(displayRationale) : null;
-  const justificationText = hasCleanRemediation
-    ? displayRationale
-    : legacySplit
-    ? legacySplit.justification
-    : displayRationale;
-  const remediationText = hasCleanRemediation
-    ? cve.remediation
-    : legacySplit
-    ? legacySplit.remediation
-    : null;
+  const displayRationale = isStub ? cve.rationale.replace(/^\[Auto-generated stub[^\]]*\]\s*/, "") : cve.rationale;
   const manualNotesText = cve.manualNotes && cve.manualNotes.trim().length > 0 ? cve.manualNotes : null;
+
+  // Latest "sent back" decision — shown prominently when DevOps revises.
+  const lastSentBack = [...revisions].reverse().find((r) => r.action === "changes_requested");
+
+  const submitDraft = (decision: "submitted") => {
+    onDecision(cve.id, decision, cve.pkg, {
+      justification: draft.justification,
+      remediation: draft.remediation,
+      notes: draft.notes,
+      ai_suggestions_applied: appliedIds,
+      edited_by_role: user?.roles?.[0],
+    });
+  };
 
   return (
     <>
-      {editOpen && (
-        <EditModal
-          cve={cve}
-          notesOnly={notesOnly}
-          onCancel={() => setEditOpen(false)}
-          onAccept={(notes) => {
-            setEditOpen(false);
-            if (notesOnly) {
-              // DevOps: persist the note locally; submission happens via "Submit all".
-              onSaveNotes?.(cveKey(cve), notes);
-            } else {
-              onDecision(cve.id, "approved", notes, cve.pkg, user?.roles?.[0]);
-            }
-          }}
-        />
+      {rejectOpen && (
+        <RejectModal cve={cve} onCancel={() => setRejectOpen(false)}
+          onConfirm={(reason, requested) => {
+            setRejectOpen(false);
+            onDecision(cve.id, "changes_requested", cve.pkg, {
+              review_comment: reason, requested_changes: requested, ai_suggestions_applied: appliedIds,
+            });
+          }} />
       )}
 
-      <main
-        className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-6 px-8 py-7"
-        style={{ background: "var(--bg)", overscrollBehavior: "contain" }}
-      >
+      <main className="flex-1 min-h-0 overflow-y-auto px-8 py-7 space-y-6"
+        style={{ background: "var(--bg)", overscrollBehavior: "contain" }}>
 
         {/* ── 1. CVE Identity bar ── */}
-        <div
-          className="rounded-2xl p-6 flex items-start gap-5"
-          style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
-        >
-          {/* CVSS gauge */}
-          <div
-            className="w-20 h-20 rounded-2xl flex flex-col items-center justify-center flex-shrink-0"
-            style={{
-              background: `rgba(${cvssColor === "var(--accent-red)" ? "248,81,73" : cvssColor === "var(--accent-orange)" ? "240,136,62" : cvssColor === "var(--accent-yellow)" ? "210,153,34" : "63,185,80"}, 0.08)`,
-              border: `1px solid ${cvssColor}33`,
-            }}
-          >
-            <span className="text-3xl font-black leading-none" style={{ color: cvssColor }}>
-              {cve.cvss}
-            </span>
-            <span className="text-[10px] font-bold uppercase tracking-widest mt-0.5" style={{ color: cvssColor + "99" }}>
-              CVSS
-            </span>
+        <div className="rounded-2xl p-6 flex items-start gap-5" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+          <div className="w-20 h-20 rounded-2xl flex flex-col items-center justify-center flex-shrink-0"
+            style={{ background: `rgba(${cvssColor === "var(--accent-red)" ? "248,81,73" : cvssColor === "var(--accent-orange)" ? "240,136,62" : cvssColor === "var(--accent-yellow)" ? "210,153,34" : "63,185,80"}, 0.08)`, border: `1px solid ${cvssColor}33` }}>
+            <span className="text-3xl font-black leading-none" style={{ color: cvssColor }}>{cve.cvss}</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest mt-0.5" style={{ color: cvssColor + "99" }}>CVSS</span>
           </div>
-
-          {/* Identity */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2.5 flex-wrap mb-1">
-              <h1 className="text-[22px] font-black tracking-tight" style={{ color: "var(--heading)" }}>
-                {cve.id}
-              </h1>
-              <span
-                className="text-[11px] font-bold px-3 py-1 rounded-full uppercase tracking-wide"
-                style={{ background: SEV_BG[cve.severity], color: sevColor, border: `1px solid ${sevColor}33` }}
-              >
-                {cve.severity}
-              </span>
+              <h1 className="text-[22px] font-black tracking-tight" style={{ color: "var(--heading)" }}>{cve.id}</h1>
+              <span className="text-[11px] font-bold px-3 py-1 rounded-full uppercase tracking-wide"
+                style={{ background: SEV_BG[cve.severity], color: sevColor, border: `1px solid ${sevColor}33` }}>{cve.severity}</span>
             </div>
             <p className="text-[13px] leading-relaxed" style={{ color: "var(--subtle)" }}>
-              <span style={{ color: "var(--body)" }}>{cve.pkg}</span>{" "}
-              <span style={{ color: "var(--dim)" }}>·</span>{" "}
-              <span>v{cve.version}</span>{" "}
-              <span style={{ color: "var(--dim)" }}>→</span>{" "}
+              <span style={{ color: "var(--body)" }}>{cve.pkg}</span>{" "}<span style={{ color: "var(--dim)" }}>·</span>{" "}
+              <span>v{cve.version}</span>{" "}<span style={{ color: "var(--dim)" }}>→</span>{" "}
               <span style={{ color: "var(--accent-green)" }}>fix: {cve.fixedIn}</span>
             </p>
-            <p className="text-[13px] mt-1 break-words" style={{ color: "var(--muted)" }}>
-              {cve.description}
-            </p>
+            <p className="text-[13px] mt-1 break-words" style={{ color: "var(--muted)" }}>{cve.description}</p>
           </div>
-
-          {/* Quick facts */}
-          <div className="flex flex-col gap-2 flex-shrink-0">
+          <div className="flex flex-col gap-2 flex-shrink-0 w-40">
             {[
               { label: "Vector",  value: cve.vector },
               { label: "Auth",    value: cve.authRequired, warn: cve.authRequired === "None" },
               { label: "Impact",  value: cve.impact.split("—")[0].trim() },
             ].map((f) => (
               <div key={f.label} className="text-right">
-                <div className="text-[10px] uppercase tracking-wider" style={{ color: "var(--dim)" }}>
-                  {f.label}
-                </div>
-                <div
-                  className="text-[12px] font-semibold"
-                  style={{ color: f.warn ? "var(--accent-red)" : "var(--faint)" }}
-                >
-                  {f.value}
-                </div>
+                <div className="text-[10px] uppercase tracking-wider" style={{ color: "var(--dim)" }}>{f.label}</div>
+                <div className="text-[12px] font-semibold break-words" style={{ color: f.warn ? "var(--accent-red)" : "var(--faint)" }}>{f.value}</div>
               </div>
             ))}
           </div>
         </div>
 
+        {/* ── Sent-back banner (DevOps revising) ── */}
+        {cve.status === "changes_requested" && lastSentBack && (
+          <div className="rounded-2xl px-6 py-4" style={{ background: "var(--accent-yellow-bg, rgba(210,153,34,0.08))", border: "1px solid rgba(210,153,34,0.3)" }}>
+            <div className="text-[12px] font-bold uppercase tracking-wider mb-1.5" style={{ color: "var(--accent-yellow)" }}>
+              Changes requested by {lastSentBack.actor}
+            </div>
+            <p className="text-[13px] leading-relaxed mb-2" style={{ color: "var(--body)" }}>{lastSentBack.review_comment}</p>
+            {lastSentBack.requested_changes && (
+              <p className="text-[13px] leading-relaxed" style={{ color: "var(--body)" }}>
+                <span className="font-semibold" style={{ color: "var(--accent-yellow)" }}>Required: </span>{lastSentBack.requested_changes}
+              </p>
+            )}
+          </div>
+        )}
+
         {/* ── 2. Rationale card ── */}
-        <div
-          className="rounded-2xl overflow-hidden"
-          style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
-        >
-          {/* Card header */}
-          <div
-            className="flex items-center gap-3 px-6 py-4"
-            style={{ borderBottom: "1px solid var(--border)" }}
-          >
+        <div className="rounded-2xl overflow-hidden" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+          <div className="flex items-center gap-3 px-6 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
             <div className="flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-[14px] font-bold" style={{ color: "var(--heading)" }}>
-                  Mitigation Rationale
+                  {editable ? "Justification & Remediation" : "Mitigation Rationale"}
                 </span>
-                {isStub ? (
-                  <span
-                    className="text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider"
-                    style={{
-                      background: "rgba(210,153,34,0.1)",
-                      color: "var(--accent-yellow)",
-                      border: "1px solid rgba(210,153,34,0.3)",
-                    }}
-                  >
+                {!editable && (isStub ? (
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider"
+                    style={{ background: "rgba(210,153,34,0.1)", color: "var(--accent-yellow)", border: "1px solid rgba(210,153,34,0.3)" }}>
                     ⚠ Offline stub — LLM quota exhausted
                   </span>
                 ) : (
-                  <span
-                    className="text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider"
-                    style={{
-                      background: "var(--accent-purple-bg)",
-                      color: "var(--accent-purple)",
-                      border: "1px solid var(--accent-purple-bdr)",
-                    }}
-                  >
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider"
+                    style={{ background: "var(--accent-purple-bg)", color: "var(--accent-purple)", border: "1px solid var(--accent-purple-bdr)" }}>
                     AI Generated
+                  </span>
+                ))}
+                {editable && (
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider"
+                    style={{ background: "var(--accent-blue-bg, rgba(68,147,248,0.12))", color: "var(--accent-blue)", border: "1px solid var(--accent-blue-bdr, rgba(68,147,248,0.25))" }}>
+                    Editable draft
                   </span>
                 )}
               </div>
             </div>
-
-            {/* RAG confidence */}
             {cve.ragMatch && (
-              <div
-                className="flex items-center gap-2.5 px-4 py-2 rounded-xl"
-                style={{
-                  background: "var(--accent-purple-bg)",
-                  border: "1px solid var(--accent-purple-bdr)",
-                }}
-              >
+              <div className="flex items-center gap-2.5 px-4 py-2 rounded-xl" style={{ background: "var(--accent-purple-bg)", border: "1px solid var(--accent-purple-bdr)" }}>
                 <div>
-                  <div className="text-[20px] font-black leading-none" style={{ color: "var(--accent-purple)" }}>
-                    {cve.ragMatch.pct}%
-                  </div>
-                  <div className="text-[10px]" style={{ color: "var(--accent-purple)" }}>
-                    memory match
-                  </div>
+                  <div className="text-[20px] font-black leading-none" style={{ color: "var(--accent-purple)" }}>{cve.ragMatch.pct}%</div>
+                  <div className="text-[10px]" style={{ color: "var(--accent-purple)" }}>memory match</div>
                 </div>
                 <div className="w-px h-8" style={{ background: "var(--accent-purple-bdr)" }} />
                 <div>
-                  <div className="text-[11px] font-semibold" style={{ color: "var(--body)" }}>
-                    {cve.ragMatch.project}
-                  </div>
-                  <div className="text-[10px]" style={{ color: "var(--muted)" }}>
-                    {cve.ragMatch.approver} · {cve.ragMatch.date}
-                  </div>
+                  <div className="text-[11px] font-semibold" style={{ color: "var(--body)" }}>{cve.ragMatch.project}</div>
+                  <div className="text-[10px]" style={{ color: "var(--muted)" }}>{cve.ragMatch.approver} · {cve.ragMatch.date}</div>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Rationale body */}
+          {/* Body — editable draft (DevOps) or read-only display */}
           <div className="px-6 py-5">
-            {displayRationale ? (
+            {editable ? (
               <div className="flex flex-col gap-4">
-                {/* Justification — always shown */}
+                <DraftField label="Justification" color="var(--accent-purple)" value={draft.justification}
+                  onChange={(v) => setDraft((d) => ({ ...d, justification: v }))}
+                  placeholder="Assess whether this vulnerability is exploitable in your environment…" />
+                <DraftField label="Proposed Remediation" color="var(--accent-green)" value={draft.remediation}
+                  onChange={(v) => setDraft((d) => ({ ...d, remediation: v }))}
+                  placeholder="Patch version, config change, or accepted-risk statement…" />
+                <DraftField label="Notes" color="var(--accent-blue)" value={draft.notes}
+                  onChange={(v) => setDraft((d) => ({ ...d, notes: v }))}
+                  placeholder="Any additional remarks for the reviewer…" />
+              </div>
+            ) : displayRationale ? (
+              <div className="flex flex-col gap-4">
                 <div className="pl-4" style={{ borderLeft: "2px solid var(--accent-purple)" }}>
-                  <div
-                    className="text-[11px] font-semibold uppercase tracking-wider mb-1.5"
-                    style={{ color: "var(--accent-purple)" }}
-                  >
-                    Justification
-                  </div>
-                  <p
-                    className="text-[14px] leading-[1.8] font-normal break-words whitespace-pre-wrap"
-                    style={{ color: "var(--body)" }}
-                  >
-                    {justificationText}
-                  </p>
+                  <div className="text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--accent-purple)" }}>Justification</div>
+                  <p className="text-[14px] leading-[1.8] break-words whitespace-pre-wrap" style={{ color: "var(--body)" }}>{displayRationale}</p>
                 </div>
-
-                {/* Recommended Remediation — shown whenever there's remediation content */}
-                {remediationText && (
+                {cve.remediation && cve.remediation.trim() && (
                   <>
                     <div style={{ borderTop: "1px solid var(--border)" }} />
                     <div className="pl-4" style={{ borderLeft: "2px solid var(--accent-green)" }}>
-                      <div
-                        className="text-[11px] font-semibold uppercase tracking-wider mb-1.5"
-                        style={{ color: "var(--accent-green)" }}
-                      >
-                        Recommended Remediation
-                      </div>
-                      <p
-                        className="text-[14px] leading-[1.8] font-normal break-words whitespace-pre-wrap"
-                        style={{ color: "var(--body)" }}
-                      >
-                        {remediationText}
-                      </p>
+                      <div className="text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--accent-green)" }}>Recommended Remediation</div>
+                      <p className="text-[14px] leading-[1.8] break-words whitespace-pre-wrap" style={{ color: "var(--body)" }}>{cve.remediation}</p>
                     </div>
                   </>
                 )}
-
-                {/* Manual Input — read-only display of human-added remarks */}
                 {manualNotesText && (
                   <>
                     <div style={{ borderTop: "1px solid var(--border)" }} />
                     <div className="pl-4" style={{ borderLeft: "2px solid var(--accent-blue)" }}>
-                      <div
-                        className="text-[11px] font-semibold uppercase tracking-wider mb-1.5 flex items-center gap-2"
-                        style={{ color: "var(--accent-blue)" }}
-                      >
+                      <div className="text-[11px] font-semibold uppercase tracking-wider mb-1.5 flex items-center gap-2" style={{ color: "var(--accent-blue)" }}>
                         Manual Input
                         {cve.editedByRole && (
-                          <span
-                            className="text-[11px] font-normal normal-case tracking-normal"
-                            style={{ color: "var(--muted)" }}
-                          >
+                          <span className="text-[11px] font-normal normal-case tracking-normal" style={{ color: "var(--muted)" }}>
                             — added by {ROLE_LABELS[cve.editedByRole as UserRole] ?? cve.editedByRole}
                           </span>
                         )}
                       </div>
-                      <p
-                        className="text-[14px] leading-[1.8] font-normal break-words whitespace-pre-wrap"
-                        style={{ color: "var(--body)" }}
-                      >
-                        {manualNotesText}
-                      </p>
+                      <p className="text-[14px] leading-[1.8] break-words whitespace-pre-wrap" style={{ color: "var(--body)" }}>{manualNotesText}</p>
                     </div>
                   </>
                 )}
               </div>
             ) : (
               <div className="flex items-center gap-3 py-4">
-                <span
-                  className="w-2 h-2 rounded-full animate-pulse"
-                  style={{ background: "var(--accent-purple)" }}
-                />
-                <span className="text-[13px]" style={{ color: "var(--muted)" }}>
-                  Agent is synthesising rationale…
-                </span>
+                <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: "var(--accent-purple)" }} />
+                <span className="text-[13px]" style={{ color: "var(--muted)" }}>Agent is synthesising rationale…</span>
               </div>
             )}
           </div>
 
-          {/* Memory source row */}
-          {cve.ragMatch && (
-            <div
-              className="mx-6 mb-5 flex items-start gap-3 px-4 py-3 rounded-xl"
-              style={{
-                background: "var(--accent-purple-bg)",
-                border: "1px solid var(--accent-purple-bdr)",
-              }}
-            >
-              <div
-                className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 mt-0.5 text-[12px]"
-                style={{ background: "var(--accent-purple-bdr)", color: "var(--accent-purple)" }}
-              >
-                ◈
-              </div>
-              <p className="text-[12px] leading-relaxed break-words" style={{ color: "var(--subtle)" }}>
-                <span style={{ color: "var(--accent-purple)" }}>Grounded from memory</span>
-                {" — "}{cve.ragMatch.summary} Approved by{" "}
-                <span style={{ color: "var(--body)" }}>{cve.ragMatch.approver}</span>
-                {cve.ragMatch.date && <> on {cve.ragMatch.date}</>}
-                {" "}({cve.ragMatch.project}).
-              </p>
+          {/* Cyber: optional review comment on approval */}
+          {isSubmitted && canApproveSubmitted && (
+            <div className="px-6 pb-4">
+              <label className="block text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--muted)" }}>Review comment (optional on approve)</label>
+              <textarea value={reviewComment} onChange={(e) => setReviewComment(e.target.value)} rows={2}
+                className="w-full px-3 py-2 rounded-xl text-[13px] leading-relaxed outline-none resize-y"
+                style={{ background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--body)" }}
+                placeholder="Note recorded with your approval…" />
             </div>
           )}
 
           {/* ── Action row ── */}
-          <div
-            className="flex items-center gap-3 px-6 py-5"
-            style={{ borderTop: "1px solid var(--border)", background: "var(--surface3)" }}
-          >
-            {isSubmitted && canApproveSubmitted ? (
+          <div className="flex items-center gap-3 px-6 py-5 flex-wrap" style={{ borderTop: "1px solid var(--border)", background: "var(--surface3)" }}>
+            {isTerminal ? (
+              <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px] font-semibold"
+                style={{ background: cve.status === "approved" ? "var(--accent-green-bg)" : "var(--accent-red-bg)", border: `1px solid ${cve.status === "approved" ? "var(--accent-green-bdr)" : "var(--accent-red-bdr)"}`, color: cve.status === "approved" ? "var(--accent-green)" : "var(--accent-red)" }}>
+                {cve.status === "approved" ? "✓ Approved" : "✕ Rejected"} — decision recorded. See the revision history below.
+              </div>
+            ) : isSubmitted && canApproveSubmitted ? (
               <>
-                {/* Cyber — Approve a finding DevOps submitted upward */}
-                <button
-                  onClick={() => onDecision(cve.id, "approved", undefined, cve.pkg)}
-                  className="flex items-center gap-2 px-8 py-3 rounded-xl text-[14px] font-bold transition-all duration-150 hover:opacity-90 active:scale-[0.98]"
-                  style={{ background: "var(--btn-accept-bg)", color: "var(--btn-accept-text)", boxShadow: "0 0 20px var(--btn-accept-glow)" }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
+                <button onClick={() => onDecision(cve.id, "approved", cve.pkg, { review_comment: reviewComment || undefined, ai_suggestions_applied: appliedIds })}
+                  className="flex items-center gap-2 px-8 py-3 rounded-xl text-[14px] font-bold transition-all hover:opacity-90 active:scale-[0.98]"
+                  style={{ background: "var(--btn-accept-bg)", color: "var(--btn-accept-text)", boxShadow: "0 0 20px var(--btn-accept-glow)" }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
                   Approve
                 </button>
-
-                {/* Add Notes (saves + approves) */}
-                <button
-                  onClick={() => setEditOpen(true)}
-                  className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all duration-150 hover:opacity-80"
-                  style={{ background: "var(--surface2)", color: "var(--faint)", border: "1px solid var(--border2)" }}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                  </svg>
-                  Add Notes
+                <button onClick={() => setShowAssistant((v) => !v)}
+                  className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all hover:opacity-80"
+                  style={{ background: "var(--accent-purple-bg)", color: "var(--accent-purple)", border: "1px solid var(--accent-purple-bdr)" }}>
+                  {showAssistant ? "Hide Review AI" : "Review AI"}
                 </button>
-
-                {/* Reject */}
-                <button
-                  onClick={() => onDecision(cve.id, "rejected", undefined, cve.pkg)}
-                  className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all duration-150 hover:opacity-80"
-                  style={{ background: "var(--accent-red-bg)", color: "var(--accent-red)", border: "1px solid var(--accent-red-bdr)" }}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                  Reject
+                <button onClick={() => setRejectOpen(true)}
+                  className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all hover:opacity-80"
+                  style={{ background: "var(--accent-red-bg)", color: "var(--accent-red)", border: "1px solid var(--accent-red-bdr)" }}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                  Reject &amp; request changes
                 </button>
               </>
             ) : isSubmitted ? (
-              /* Submitted, but this role can't approve it — strict Cyber-only lockout */
-              <div
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px]"
-                style={{ background: "var(--accent-blue-bg, rgba(68,147,248,0.08))", border: "1px solid var(--accent-blue-bdr, rgba(68,147,248,0.25))", color: "var(--accent-blue)" }}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M22 2 11 13" /><path d="M22 2 15 22 11 13 2 9z" />
-                </svg>
+              <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px]"
+                style={{ background: "var(--accent-blue-bg, rgba(68,147,248,0.08))", border: "1px solid var(--accent-blue-bdr, rgba(68,147,248,0.25))", color: "var(--accent-blue)" }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M22 2 11 13" /><path d="M22 2 15 22 11 13 2 9z" /></svg>
                 Submitted — awaiting Cyber Manager approval.
               </div>
-            ) : notesOnly ? (
-              cve.status === "pending" ? (
-                <>
-                  {/* DevOps — submit THIS finding for Cyber approval (with any note) */}
-                  <button
-                    onClick={() => onDecision(cve.id, "submitted", cve.manualNotes?.trim() ? cve.manualNotes : undefined, cve.pkg, user?.roles?.[0])}
-                    className="flex items-center gap-2 px-8 py-3 rounded-xl text-[14px] font-bold transition-all duration-150 hover:opacity-90 active:scale-[0.98]"
-                    style={{ background: "var(--btn-accept-bg)", color: "var(--btn-accept-text)", boxShadow: "0 0 20px var(--btn-accept-glow)" }}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                      <path d="M22 2 11 13" /><path d="M22 2 15 22 11 13 2 9z" />
-                    </svg>
-                    Submit for Approval
-                  </button>
-
-                  {/* Add Notes (local, sent with this submit) */}
-                  <button
-                    onClick={() => setEditOpen(true)}
-                    className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all duration-150 hover:opacity-80"
-                    style={{ background: "var(--surface2)", color: "var(--faint)", border: "1px solid var(--border2)" }}
-                  >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                    </svg>
-                    Add Notes
-                  </button>
-                </>
-              ) : (
-                /* DevOps viewing an already-decided finding */
-                <div
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px]"
-                  style={{ background: "var(--surface2)", border: "1px solid var(--border2)", color: "var(--muted)" }}
-                >
-                  This finding has already been {cve.status}. No action needed.
-                </div>
-              )
+            ) : editable ? (
+              <>
+                <button onClick={() => submitDraft("submitted")}
+                  className="flex items-center gap-2 px-8 py-3 rounded-xl text-[14px] font-bold transition-all hover:opacity-90 active:scale-[0.98]"
+                  style={{ background: "var(--btn-accept-bg)", color: "var(--btn-accept-text)", boxShadow: "0 0 20px var(--btn-accept-glow)" }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M22 2 11 13" /><path d="M22 2 15 22 11 13 2 9z" /></svg>
+                  {cve.status === "changes_requested" ? "Resubmit for approval" : "Submit for approval"}
+                </button>
+                <button onClick={() => setShowAssistant((v) => !v)}
+                  className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all hover:opacity-80"
+                  style={{ background: "var(--accent-purple-bg)", color: "var(--accent-purple)", border: "1px solid var(--accent-purple-bdr)" }}>
+                  {showAssistant ? "Hide Review AI" : "Review AI"}
+                </button>
+              </>
+            ) : canApproveSubmitted && isDraftState ? (
+              <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px]"
+                style={{ background: "var(--surface2)", border: "1px solid var(--border2)", color: "var(--muted)" }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                {cve.status === "changes_requested" ? "Sent back — awaiting DevOps revision & resubmission." : "Awaiting DevOps submission before you can review."}
+              </div>
             ) : canReject ? (
               <>
-                {/* Primary — Accept */}
-                <button
-                  onClick={() => onDecision(cve.id, "approved", undefined, cve.pkg)}
-                  className="flex items-center gap-2 px-8 py-3 rounded-xl text-[14px] font-bold transition-all duration-150 hover:opacity-90 active:scale-[0.98]"
-                  style={{
-                    background: "var(--btn-accept-bg)",
-                    color: "var(--btn-accept-text)",
-                    boxShadow: "0 0 20px var(--btn-accept-glow)",
-                  }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
+                <button onClick={() => onDecision(cve.id, "approved", cve.pkg)}
+                  className="flex items-center gap-2 px-8 py-3 rounded-xl text-[14px] font-bold transition-all hover:opacity-90 active:scale-[0.98]"
+                  style={{ background: "var(--btn-accept-bg)", color: "var(--btn-accept-text)", boxShadow: "0 0 20px var(--btn-accept-glow)" }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
                   Accept
                 </button>
-
-                {/* Secondary — Edit */}
-                <button
-                  onClick={() => setEditOpen(true)}
-                  className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all duration-150 hover:opacity-80"
-                  style={{
-                    background: "var(--surface2)",
-                    color: "var(--faint)",
-                    border: "1px solid var(--border2)",
-                  }}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                  </svg>
-                  Add Notes
-                </button>
-
-                {/* Danger — Reject */}
-                <button
-                  onClick={() => onDecision(cve.id, "rejected", undefined, cve.pkg)}
-                  className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all duration-150 hover:opacity-80"
-                  style={{
-                    background: "var(--accent-red-bg)",
-                    color: "var(--accent-red)",
-                    border: "1px solid var(--accent-red-bdr)",
-                  }}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
+                <button onClick={() => onDecision(cve.id, "rejected", cve.pkg)}
+                  className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all hover:opacity-80"
+                  style={{ background: "var(--accent-red-bg)", color: "var(--accent-red)", border: "1px solid var(--accent-red-bdr)" }}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
                   Reject
                 </button>
               </>
             ) : canApprove ? (
-              <>
-                {/* Primary — Submit (submit-only workflow: no reject) */}
-                <button
-                  onClick={() => onDecision(cve.id, "approved", undefined, cve.pkg)}
-                  className="flex items-center gap-2 px-8 py-3 rounded-xl text-[14px] font-bold transition-all duration-150 hover:opacity-90 active:scale-[0.98]"
-                  style={{
-                    background: "var(--btn-accept-bg)",
-                    color: "var(--btn-accept-text)",
-                    boxShadow: "0 0 20px var(--btn-accept-glow)",
-                  }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                  Submit
-                </button>
-
-                {/* Secondary — Edit */}
-                <button
-                  onClick={() => setEditOpen(true)}
-                  className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all duration-150 hover:opacity-80"
-                  style={{
-                    background: "var(--surface2)",
-                    color: "var(--faint)",
-                    border: "1px solid var(--border2)",
-                  }}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                  </svg>
-                  Add Notes
-                </button>
-              </>
+              <button onClick={() => onDecision(cve.id, "approved", cve.pkg)}
+                className="flex items-center gap-2 px-8 py-3 rounded-xl text-[14px] font-bold transition-all hover:opacity-90 active:scale-[0.98]"
+                style={{ background: "var(--btn-accept-bg)", color: "var(--btn-accept-text)", boxShadow: "0 0 20px var(--btn-accept-glow)" }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
+                Approve
+              </button>
             ) : (
-              /* Read-only notice for non-approvers — unreachable by any of
-                 today's 4 roles (ADMIN/DEVOPS_ENGINEER/DSO_MANAGER/CYBER_MANAGER
-                 all have canApprove: true), kept for any future role that needs it */
-              <div
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px]"
-                style={{ background: "var(--accent-yellow-bg, rgba(210,153,34,0.08))", border: "1px solid rgba(210,153,34,0.2)", color: "var(--accent-yellow)" }}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                  <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                </svg>
-                Read-only — your role ({user ? user.roles.map(r => ROLE_LABELS[r]).join(", ") : "current role"}) cannot approve or reject CVEs. A Cyber Manager must review this finding.
+              <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px]"
+                style={{ background: "var(--surface2)", border: "1px solid var(--border2)", color: "var(--muted)" }}>
+                This finding has already been {cve.status.replace("_", " ")}. No action needed.
               </div>
             )}
 
-            {/* Progress indicator */}
             <div className="ml-auto flex items-center gap-3">
               <div className="text-right">
                 <div className="text-[13px] font-semibold" style={{ color: "var(--heading)" }}>
                   {reviewedCount} <span style={{ color: "var(--dim)" }}>/</span> {totalCves}
                 </div>
-                <div className="text-[11px]" style={{ color: "var(--muted)" }}>
-                  {approvedCount} approved
-                </div>
+                <div className="text-[11px]" style={{ color: "var(--muted)" }}>{approvedCount} approved</div>
               </div>
-              {/* Mini donut */}
               <svg width="36" height="36" viewBox="0 0 36 36">
                 <circle cx="18" cy="18" r="14" fill="none" stroke="var(--border)" strokeWidth="3" />
-                <circle
-                  cx="18" cy="18" r="14"
-                  fill="none"
-                  stroke="var(--accent-green)"
-                  strokeWidth="3"
-                  strokeDasharray={`${totalCves > 0 ? (reviewedCount / totalCves) * 88 : 0} 88`}
-                  strokeLinecap="round"
-                  transform="rotate(-90 18 18)"
-                />
+                <circle cx="18" cy="18" r="14" fill="none" stroke="var(--accent-green)" strokeWidth="3"
+                  strokeDasharray={`${totalCves > 0 ? (reviewedCount / totalCves) * 88 : 0} 88`} strokeLinecap="round" transform="rotate(-90 18 18)" />
               </svg>
             </div>
           </div>
         </div>
 
-        {/* ── 3. Agent drawer ── */}
+        {/* ── Review AI assistant ── */}
+        {showAssistant && (isSubmitted ? canApproveSubmitted : editable) && (
+          <ReviewAssistant runId={runId} cve={cve} mode={assistantMode}
+            draft={editable ? draft : { justification: cve.rationale ?? "", remediation: cve.remediation ?? "", notes: cve.manualNotes ?? "" }}
+            appliedIds={appliedIds} onApply={applySuggestion} />
+        )}
+
+        {/* ── Revision history ── */}
+        <RevisionTimeline revisions={revisions} />
+
+        {runId && <BaselinePublisher key={`${runId}:${cveKey(cve)}`} runId={runId} cve={cve} />}
+
+        {/* ── Agent drawer ── */}
         <AgentDrawer steps={agentSteps} tokenFragment={tokenFragment} />
       </main>
     </>
