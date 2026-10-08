@@ -8,16 +8,19 @@ For each CVE:
 Set env vars:
   ANTHROPIC_BASE_URL   = https://llm.ibm-rad.com   (or any LiteLLM gateway)
   ANTHROPIC_AUTH_TOKEN = sk-...                     (your RAD usage key)
-  RAD_MODEL            = claude-3-5-sonnet-20241022 (optional, default below)
+  RAD_MODEL            = global.anthropic.claude-sonnet-4-6 (optional, default below)
+  RAD_CONCURRENCY      = 5   (max parallel LLM calls, default 5)
+  RAD_RETRIES          = 3   (retries on rate-limit / 5xx, default 3)
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import time
+import urllib.error
 import urllib.request
-from typing import Any
 
 from agent.state import AgentState, AgentStep
 from rag.store import query_memory
@@ -25,18 +28,22 @@ from rag.store import query_memory
 logger = logging.getLogger("control_tower")
 
 # ── IBM RAD / Anthropic gateway config ────────────────────────────────────
-RAD_BASE_URL = os.getenv("ANTHROPIC_BASE_URL", "https://llm.ibm-rad.com")
-RAD_AUTH_TOKEN = os.getenv("ANTHROPIC_AUTH_TOKEN", "")
-RAD_MODEL    = os.getenv("RAD_MODEL", "global.anthropic.claude-sonnet-4-6")
-RAD_TIMEOUT  = int(os.getenv("RAD_TIMEOUT", "60"))   # seconds per CVE
+RAD_BASE_URL    = os.getenv("ANTHROPIC_BASE_URL", "https://llm.ibm-rad.com")
+RAD_AUTH_TOKEN  = os.getenv("ANTHROPIC_AUTH_TOKEN", "")
+RAD_MODEL       = os.getenv("RAD_MODEL", "global.anthropic.claude-sonnet-4-6")
+RAD_TIMEOUT     = int(os.getenv("RAD_TIMEOUT", "60"))    # seconds per CVE
+RAD_CONCURRENCY = int(os.getenv("RAD_CONCURRENCY", "5")) # parallel calls
+RAD_RETRIES     = int(os.getenv("RAD_RETRIES", "3"))     # retries on 429/5xx
+RAD_MAX_LLM     = int(os.getenv("RAD_MAX_LLM", "20"))    # max CVEs to call LLM for (top by CVSS)
 
 
-# ── Anthropic messages API client ──────────────────────────────────────────
+# ── Anthropic messages API client (sync, called from thread pool) ──────────
 
-def _rad_generate(prompt: str) -> str:
+def _rad_generate_sync(prompt: str) -> str:
     """
     Call the IBM RAD gateway (Anthropic-compatible /v1/messages endpoint).
     Returns the generated text, or raises on error.
+    Runs synchronously — called via asyncio.to_thread.
     """
     url = f"{RAD_BASE_URL.rstrip('/')}/v1/messages"
 
@@ -59,15 +66,24 @@ def _rad_generate(prompt: str) -> str:
         method="POST",
     )
 
-    with urllib.request.urlopen(req, timeout=RAD_TIMEOUT) as resp:
-        body = json.loads(resp.read().decode())
-
-    # Anthropic response: body["content"][0]["text"]
-    content = body.get("content", [])
-    if content and content[0].get("type") == "text":
-        return content[0]["text"].strip()
-
-    raise RuntimeError(f"Unexpected RAD response: {body}")
+    for attempt in range(RAD_RETRIES):
+        try:
+            with urllib.request.urlopen(req, timeout=RAD_TIMEOUT) as resp:
+                body = json.loads(resp.read().decode())
+            content = body.get("content", [])
+            if content and content[0].get("type") == "text":
+                return content[0]["text"].strip()
+            raise RuntimeError(f"Unexpected RAD response: {body}")
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 529) and attempt < RAD_RETRIES - 1:
+                # Rate-limited — back off exponentially
+                backoff = 2 ** attempt
+                logger.warning("RAD rate-limited (%s), retrying in %ss (attempt %d/%d)",
+                               e.code, backoff, attempt + 1, RAD_RETRIES)
+                time.sleep(backoff)
+                continue
+            raise
+    raise RuntimeError("RAD gateway: exhausted retries")
 
 
 # ── Prompt builder ─────────────────────────────────────────────────────────
@@ -121,39 +137,35 @@ def _stub_rationale(cve: dict) -> str:
     )
 
 
-# ── Synthesis node ──────────────────────────────────────────────────────────
+# ── Per-CVE async worker ───────────────────────────────────────────────────
 
-def synthesis_node(state: AgentState) -> dict:
+async def _synthesise_one(
+    cve: dict,
+    project_id: str,
+    cis_profile: str,
+    sem: asyncio.Semaphore,
+    use_llm: bool = True,
+) -> dict:
     """
-    LangGraph node: synthesise rationale for every queued CVE.
-    Calls the IBM RAD gateway (Anthropic-compatible). Falls back to offline stub.
+    Async worker for a single CVE:
+      - RAG lookup (sync, fast — no I/O throttle needed)
+      - RAD call under semaphore (I/O bound) — only when use_llm=True
+    Returns a dict with keys: cve, rag_hits, steps, elapsed, source, tokens
     """
-    cves        = [dict(c) for c in state["cves"]]
-    project_id  = state.get("project_id", "UNKNOWN")
-    cis_profile = state.get("cis_profile", "CIS Level 1")
-
-    steps: list[AgentStep]       = list(state.get("agent_steps", []))
-    total_tokens: int            = state.get("tokens_used", 0)
-    rag_hit_count: int           = state.get("rag_hits", 0)
-    synthesis_times: list[float] = []
-    last_fragment                = ""
-
-    for i, cve in enumerate(cves):
-        if cve["status"] not in ("queued",):
-            continue
-
+    async with sem:
         t0 = time.time()
 
-        # ── 1. RAG retrieval ────────────────────────────────────────────────
+        # RAG lookup (pure Python, no network — run inline)
         hits = query_memory(
             cve_id=cve["id"],
             description=cve["description"],
             severity=cve["severity"],
         )
+
+        updated_cve = dict(cve)
         if hits:
-            rag_hit_count += 1
             top = hits[0]
-            cves[i]["rag_match"] = {
+            updated_cve["rag_match"] = {
                 "pct":      top["score"],
                 "project":  top["project_id"],
                 "approver": top["approver"],
@@ -166,56 +178,124 @@ def synthesis_node(state: AgentState) -> dict:
             {"label": f"{len(hits)} hit{'s' if len(hits) > 1 else ''}", "variant": "done"}
             if hits else {"label": "no prior match", "variant": "stream"}
         )
-        steps.append(AgentStep(
+        rag_step = AgentStep(
             id=f"rag-{cve['id']}",
             title=f"Memory search — {cve['id']}",
             desc=f"{len(hits)} prior decision(s) found." if hits else "No prior match — generating from scratch.",
             chips=rag_chips,
             state="done",
-        ))
+        )
 
-        # ── 2. IBM RAD generation ───────────────────────────────────────────
+        # RAD generation — only for top-N CVEs by CVSS (use_llm=True)
         rationale = ""
         source    = "stub"
+        tokens    = 0
 
-        if RAD_AUTH_TOKEN:
+        if use_llm and RAD_AUTH_TOKEN:
             try:
-                prompt    = _build_prompt(cve, hits, project_id, cis_profile)
-                rationale = _rad_generate(prompt)
+                prompt    = _build_prompt(updated_cve, hits, project_id, cis_profile)
+                # Run blocking HTTP call in thread pool so other CVEs proceed in parallel
+                rationale = await asyncio.to_thread(_rad_generate_sync, prompt)
                 source    = "rad"
-                # rough token estimate
-                total_tokens += len(prompt.split()) + len(rationale.split())
+                tokens    = len(prompt.split()) + len(rationale.split())
             except Exception as e:
                 logger.warning("RAD gateway failed for %s (%s) — using stub", cve["id"], e)
+        elif not use_llm:
+            logger.debug("Skipping RAD for %s (below top-%d CVSS threshold)", cve["id"], RAD_MAX_LLM)
         else:
             logger.info("ANTHROPIC_AUTH_TOKEN not set — using stub for %s", cve["id"])
 
         if not rationale:
-            rationale = _stub_rationale(cve)
+            rationale = _stub_rationale(updated_cve)
             source    = "stub"
 
-        last_fragment        = rationale
-        cves[i]["rationale"] = rationale
-        cves[i]["status"]    = "pending"
+        updated_cve["rationale"] = rationale
+        updated_cve["status"]    = "pending"
 
         elapsed = round(time.time() - t0, 2)
-        synthesis_times.append(elapsed)
 
-        label_variant = "llm"    if source == "rad"  else "stream"
-        source_label  = "ibm_rad" if source == "rad" else "offline_stub"
+        label_variant = "llm"     if source == "rad"  else "stream"
+        source_label  = "ibm_rad" if source == "rad"  else "offline_stub"
 
-        steps.append(AgentStep(
+        draft_step = AgentStep(
             id=f"draft-{cve['id']}",
             title=f"Rationale drafted — {cve['id']}",
             desc=rationale[:120] + "…" if len(rationale) > 120 else rationale,
             chips=[
                 {"label": source_label, "variant": label_variant},
-                {"label": f"{elapsed}s", "variant": "done"},
+                {"label": f"{elapsed}s",  "variant": "done"},
             ],
             state="done",
-        ))
+        )
 
-    avg_s = round(sum(synthesis_times) / len(synthesis_times), 1) if synthesis_times else 0.0
+        return {
+            "cve":      updated_cve,
+            "rag_hits": len(hits),
+            "steps":    [rag_step, draft_step],
+            "elapsed":  elapsed,
+            "source":   source,
+            "tokens":   tokens,
+        }
+
+
+# ── Synthesis node ──────────────────────────────────────────────────────────
+
+def synthesis_node(state: AgentState) -> dict:
+    """
+    LangGraph node: synthesise rationale for every queued CVE.
+    Calls IBM RAD gateway with up to RAD_CONCURRENCY parallel requests.
+    Falls back to offline stub per CVE if the gateway fails.
+    """
+    cves        = [dict(c) for c in state["cves"]]
+    project_id  = state.get("project_id", "UNKNOWN")
+    cis_profile = state.get("cis_profile", "CIS Level 1")
+
+    queued = [(i, cve) for i, cve in enumerate(cves) if cve["status"] == "queued"]
+
+    if not queued:
+        return {}
+
+    # Determine which CVEs get real LLM calls: top RAD_MAX_LLM by CVSS score
+    sorted_by_cvss = sorted(queued, key=lambda x: float(x[1].get("cvss", 0)), reverse=True)
+    llm_set = {cve["id"] for _, cve in sorted_by_cvss[:RAD_MAX_LLM]}
+    logger.info("synthesis_node: %d queued CVEs, %d will use LLM (top CVSS), %d will use stub",
+                len(queued), len(llm_set), len(queued) - len(llm_set))
+
+    async def _run_all():
+        sem = asyncio.Semaphore(RAD_CONCURRENCY)
+        tasks = [
+            _synthesise_one(cve, project_id, cis_profile, sem, use_llm=(cve["id"] in llm_set))
+            for _, cve in queued
+        ]
+        return await asyncio.gather(*tasks)
+
+    # Run the async batch — works whether or not there's an existing event loop
+    try:
+        loop = asyncio.get_running_loop()
+        # We're inside an existing loop (e.g. FastAPI); run in a new thread
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            future = pool.submit(asyncio.run, _run_all())
+            results = future.result()
+    except RuntimeError:
+        results = asyncio.run(_run_all())
+
+    # Merge results back into cves list
+    steps: list[AgentStep] = list(state.get("agent_steps", []))
+    total_tokens   = state.get("tokens_used", 0)
+    rag_hit_count  = state.get("rag_hits", 0)
+    elapsed_times  = []
+    last_fragment  = ""
+
+    for (orig_idx, _), result in zip(queued, results):
+        cves[orig_idx] = result["cve"]
+        steps.extend(result["steps"])
+        total_tokens  += result["tokens"]
+        rag_hit_count += result["rag_hits"]
+        elapsed_times.append(result["elapsed"])
+        last_fragment = result["cve"]["rationale"]
+
+    avg_s = round(sum(elapsed_times) / len(elapsed_times), 1) if elapsed_times else 0.0
 
     return {
         "cves":            cves,
