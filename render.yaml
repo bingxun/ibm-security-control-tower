@@ -22,6 +22,12 @@ services:
         value: /app/data/rag_memory.json
       - key: SUPER_ADMIN_PASSWORD
         generateValue: true
+      - key: ANTHROPIC_BASE_URL
+        sync: false
+      - key: ANTHROPIC_AUTH_TOKEN
+        sync: false
+      - key: RAD_MODEL
+        value: claude-sonnet-4-6
       - key: WATSONX_API_KEY
         sync: false
       - key: WATSONX_PROJECT_ID
@@ -34,7 +40,7 @@ services:
     region: singapore
     plan: free
     rootDir: ui
-    buildCommand: npm ci && npm run build
+    buildCommand: npm install --no-audit --no-fund && npm run build
     startCommand: npm run start -- --hostname 0.0.0.0 --port $PORT
     healthCheckPath: /login
     autoDeployTrigger: off
