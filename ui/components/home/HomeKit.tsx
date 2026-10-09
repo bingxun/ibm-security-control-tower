@@ -109,10 +109,11 @@ export function StatGrid({ children, cols = 4 }: { children: ReactNode; cols?: 3
 }
 
 // ── Agent impact: quantifies what the autonomous triage saved ────────────────
-export function AgentImpact({ autoApproved }: { autoApproved: number }) {
+export function AgentImpact({ autoApproved, triaged = 0 }: { autoApproved: number; triaged?: number }) {
   if (!autoApproved) return null;
   const mins = autoApproved * 6; // ~6 min of human review saved per finding
   const saved = mins >= 60 ? `${(mins / 60).toFixed(1)} hrs` : `${mins} min`;
+  const autonomyRate = triaged > 0 ? Math.round((autoApproved / triaged) * 100) : 0;
   return (
     <div
       className="rounded-2xl px-6 py-5 flex items-center gap-6 flex-wrap ct-fade-up"
@@ -139,6 +140,17 @@ export function AgentImpact({ autoApproved }: { autoApproved: number }) {
           <span className="text-[13px]" style={{ color: "var(--subtle)" }}>of manual review saved</span>
         </div>
       </div>
+      {autonomyRate > 0 && (
+        <>
+          <div className="w-px h-10 hidden sm:block" style={{ background: "var(--accent-purple-bdr)" }} />
+          <div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-[22px] font-black leading-none" style={{ color: "var(--accent-purple)" }}>{autonomyRate}%</span>
+              <span className="text-[13px]" style={{ color: "var(--subtle)" }}>handled autonomously</span>
+            </div>
+          </div>
+        </>
+      )}
       <span className="ml-auto text-[11px] hidden md:block" style={{ color: "var(--muted)" }}>Autonomous · exact CVE match · fully audited</span>
     </div>
   );

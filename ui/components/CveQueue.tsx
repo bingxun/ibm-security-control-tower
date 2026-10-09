@@ -49,6 +49,8 @@ export default function CveQueue({ cves, selectedId, onSelect }: Props) {
   const submitted = cves.filter((c) => c.status === "submitted").length;
   const changesRequested = cves.filter((c) => c.status === "changes_requested").length;
   const pending   = cves.filter((c) => c.status === "pending" || c.status === "queued").length;
+  // Findings the agent auto-approved from a published Cyber baseline (learning loop).
+  const agentCleared = cves.filter((c) => c.editedByRole === "AGENT" && c.status === "approved").length;
   const done      = approved + rejected;
   const pct       = cves.length > 0 ? Math.round((done / cves.length) * 100) : 0;
 
@@ -98,6 +100,18 @@ export default function CveQueue({ cves, selectedId, onSelect }: Props) {
             ) : null
           )}
         </div>
+
+        {/* Agent pre-cleared chip — the learning loop at a glance */}
+        {agentCleared > 0 && (
+          <div className="flex items-center gap-1.5 mb-2.5 px-2 py-1 rounded-lg"
+            style={{ background: "var(--accent-purple-bg)", border: "1px solid var(--accent-purple-bdr)" }}
+            title="Auto-approved from published Cyber Manager baselines">
+            <span className="text-[11px]" style={{ color: "var(--accent-purple)" }}>⚡</span>
+            <span className="text-[10px] font-semibold" style={{ color: "var(--accent-purple)" }}>
+              Agent pre-cleared {agentCleared} of {cves.length}
+            </span>
+          </div>
+        )}
 
         {/* Progress bar */}
         <div className="h-1 rounded-full overflow-hidden mb-1.5" style={{ background: "var(--border)" }}>

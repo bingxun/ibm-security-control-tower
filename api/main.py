@@ -48,6 +48,7 @@ load_dotenv(override=True)
 
 # ── LangGraph graph (single shared instance with MemorySaver) ──────────────
 from agent.graph import build_graph, make_initial_state
+from agent import progress as synthesis_progress
 from rag.store import count_decisions, persist_decision, query_memory
 from db.database import (
     init_db, create_run, update_run_status, update_run_stats,
@@ -156,6 +157,23 @@ def _run_snapshot(run_id: str) -> dict:
                 "status":       c.get("status", "queued"),
             }
 
+        agent_steps = list(state.get("agent_steps", []))
+        token_fragment = state.get("token_fragment", "")
+        tokens_used = state.get("tokens_used", 0)
+        rag_hits = state.get("rag_hits", 0)
+
+        # Overlay in-flight synthesis progress (workers that have finished while
+        # the synthesis node is still running) so the UI advances live instead
+        # of sitting idle until the whole batch returns.
+        prog = synthesis_progress.get(run_id) if run.get("status") == "running" else None
+        if prog and prog["cves"]:
+            done = prog["cves"]
+            raw_cves = [done.get(f"{c.get('id')}::{c.get('pkg')}", c) for c in raw_cves]
+            seen = {s.get("id") for s in agent_steps}
+            agent_steps = agent_steps + [s for s in prog["steps"] if s.get("id") not in seen]
+            tokens_used = max(tokens_used, prog["tokens"])
+            rag_hits = max(rag_hits, prog["rag_hits"])
+
         cves = [_cve_from_state(c) for c in raw_cves]
         approved = sum(1 for c in cves if c["status"] == "approved")
         rejected = sum(1 for c in cves if c["status"] == "rejected")
@@ -167,16 +185,16 @@ def _run_snapshot(run_id: str) -> dict:
             "project_id":     run.get("project_id", ""),
             "started_at":     run.get("started_at", ""),
             "cves":           cves,
-            "agent_steps":    state.get("agent_steps", []),
-            "token_fragment": state.get("token_fragment", ""),
+            "agent_steps":    agent_steps,
+            "token_fragment": token_fragment,
             "trivy_logs":     run.get("trivy_logs", []),
             "stats": {
                 "total":         len(cves),
                 "approved":      approved,
                 "rejected":      rejected,
                 "avgSynthesisS": state.get("avg_synthesis_s", 0),
-                "ragHits":       state.get("rag_hits", 0),
-                "tokensUsed":    state.get("tokens_used", 0),
+                "ragHits":       rag_hits,
+                "tokensUsed":    tokens_used,
             },
         }
 
@@ -326,6 +344,7 @@ async def _run_agent_async(run_id: str, initial_state: dict) -> None:
         rag_hits=final_vals.get("rag_hits", 0),
     )
 
+    synthesis_progress.clear(run_id)  # synthesis done — stop overlaying progress
     if state and state.next:
         run["status"] = "awaiting_approval"
         run["langgraph_state"] = state.values
@@ -366,6 +385,7 @@ async def _run_pipeline(run_id: str, image_ref: str, meta: dict) -> None:
         logger.error("Pipeline error for run %s: %s\n%s", run_id, e, tb)
         run["status"] = "error"
         run["error"] = str(e)
+        synthesis_progress.clear(run_id)
         update_run_status(run_id, "error", error=str(e))
         _push_event(run_id, "error")
 

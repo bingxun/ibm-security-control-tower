@@ -163,6 +163,13 @@ export default function CveReview({
   // Latest "sent back" decision — shown prominently when DevOps revises.
   const lastSentBack = [...revisions].reverse().find((r) => r.action === "changes_requested");
 
+  // ── Learning loop surfacing ──────────────────────────────────────────────
+  // The agent auto-approved this finding from a Cyber-published baseline.
+  const autoApproved = cve.editedByRole === "AGENT" && cve.status === "approved";
+  // A pending finding the agent *recommends* a decision on, grounded in memory.
+  const memoryRecommendation = !autoApproved && !isTerminal && cve.ragMatch
+    ? cve.ragMatch : null;
+
   const submitDraft = (decision: "submitted") => {
     onDecision(cve.id, decision, cve.pkg, {
       justification: draft.justification,
@@ -187,6 +194,49 @@ export default function CveReview({
 
       <main className="flex-1 min-h-0 overflow-y-auto px-8 py-7 space-y-6"
         style={{ background: "var(--bg)", overscrollBehavior: "contain" }}>
+
+        {/* ── Agent auto-approval hero (the learning loop paid off) ── */}
+        {autoApproved && (
+          <div className="rounded-2xl px-6 py-4 flex items-center gap-4 ct-fade-up"
+            style={{ background: "linear-gradient(135deg, rgba(63,185,80,0.16), rgba(88,166,255,0.08))", border: "1px solid var(--accent-green-bdr)" }}>
+            <span className="grid place-items-center w-10 h-10 rounded-2xl flex-shrink-0 text-[18px]"
+              style={{ background: "var(--accent-green-bg)", color: "var(--accent-green)", border: "1px solid var(--accent-green-bdr)" }}>⚡</span>
+            <div className="min-w-0">
+              <div className="text-[13px] font-bold" style={{ color: "var(--heading)" }}>Autonomously approved by the agent</div>
+              <div className="text-[12px] mt-0.5" style={{ color: "var(--subtle)" }}>
+                Grounded in a Cyber Manager baseline{cve.ragMatch?.approver ? <> originally approved by <span style={{ color: "var(--body)" }}>{cve.ragMatch.approver}</span></> : null}
+                {cve.ragMatch?.date ? <> · {cve.ragMatch.date}</> : null} — no human review needed.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Agent recommendation from memory (pending finding) ── */}
+        {memoryRecommendation && (
+          <div className="rounded-2xl px-6 py-4 flex items-center gap-4 ct-fade-up"
+            style={{ background: "var(--accent-purple-bg)", border: "1px solid var(--accent-purple-bdr)" }}>
+            <span className="grid place-items-center w-10 h-10 rounded-2xl flex-shrink-0 text-[18px]"
+              style={{ background: "var(--accent-purple-bg)", color: "var(--accent-purple)", border: "1px solid var(--accent-purple-bdr)" }}>◈</span>
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px] font-bold" style={{ color: "var(--accent-purple)" }}>
+                Agent recommends approval · {memoryRecommendation.pct}% memory match
+              </div>
+              <div className="text-[12px] mt-0.5" style={{ color: "var(--subtle)" }}>
+                A similar finding was approved by <span style={{ color: "var(--body)" }}>{memoryRecommendation.approver}</span>
+                {memoryRecommendation.date ? <> on {memoryRecommendation.date}</> : null}
+                {memoryRecommendation.project ? <> ({memoryRecommendation.project})</> : null}.
+              </div>
+            </div>
+            {canApprove && !isSubmitted && !editable && (
+              <button onClick={() => onDecision(cve.id, "approved", cve.pkg)}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13px] font-bold flex-shrink-0 transition-opacity hover:opacity-85"
+                style={{ background: "var(--btn-accept-bg)", color: "var(--btn-accept-text)", boxShadow: "0 0 16px var(--btn-accept-glow)" }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
+                Approve as recommended
+              </button>
+            )}
+          </div>
+        )}
 
         {/* ── 1. CVE Identity bar ── */}
         <div className="rounded-2xl p-6 flex items-start gap-5" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>

@@ -98,7 +98,7 @@ export default function Home() {
       </StatGrid>
 
       {/* Agent impact — what the autonomous triage saved */}
-      <AgentImpact autoApproved={stats.autoApproved} />
+      <AgentImpact autoApproved={stats.autoApproved} triaged={stats.cvesTriaged} />
 
       {/* Security posture — severity distribution + review progress */}
       {scans.length > 0 && <PostureCard scans={scans} />}

@@ -24,6 +24,7 @@ import urllib.request
 
 from agent.state import AgentState, AgentStep
 from rag.store import query_memory
+from agent import progress
 from db.baselines import references, project_approvals
 
 logger = logging.getLogger("control_tower")
@@ -183,6 +184,7 @@ async def _synthesise_one(
     sem: asyncio.Semaphore,
     use_llm: bool = True,
     environment_markdown: str = "",
+    run_id: str = "",
 ) -> dict:
     """
     Async worker for a single CVE:
@@ -278,6 +280,17 @@ async def _synthesise_one(
             state="done",
         )
 
+        # Publish this worker's completion so the UI advances live, one CVE at a
+        # time, instead of waiting for the whole batch to return.
+        progress.record(
+            run_id,
+            f"{updated_cve['id']}::{updated_cve['pkg']}",
+            updated_cve,
+            [rag_step, draft_step],
+            tokens,
+            len(hits),
+        )
+
         return {
             "cve":      updated_cve,
             "rag_hits": len(hits),
@@ -305,6 +318,9 @@ def synthesis_node(state: AgentState) -> dict:
     if not queued:
         return {}
 
+    run_id = state.get("run_id", "")
+    progress.start(run_id, len(queued))
+
     # Determine which CVEs get real LLM calls: top RAD_MAX_LLM by CVSS score
     sorted_by_cvss = sorted(queued, key=lambda x: float(x[1].get("cvss", 0)), reverse=True)
     llm_set = {cve["id"] for _, cve in sorted_by_cvss[:RAD_MAX_LLM]}
@@ -314,7 +330,7 @@ def synthesis_node(state: AgentState) -> dict:
     async def _run_all():
         sem = asyncio.Semaphore(RAD_CONCURRENCY)
         tasks = [
-            _synthesise_one(cve, project_id, cis_profile, sem, use_llm=(cve["id"] in llm_set), environment_markdown=state.get("environment_markdown", ""))
+            _synthesise_one(cve, project_id, cis_profile, sem, use_llm=(cve["id"] in llm_set), environment_markdown=state.get("environment_markdown", ""), run_id=run_id)
             for _, cve in queued
         ]
         return await asyncio.gather(*tasks)

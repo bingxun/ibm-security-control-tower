@@ -7,6 +7,7 @@ import RequireAuth from "@/components/RequireAuth";
 import CveQueue from "@/components/CveQueue";
 import CveReview from "@/components/CveReview";
 import ContextPanel from "@/components/ContextPanel";
+import MissionControl from "@/components/MissionControl";
 
 import { CveRecord, AgentStep, RunStats, DecisionExtra, cveKey } from "@/lib/types";
 import { streamRun, submitDecision, getRun, applyBaselines, type ScanRun } from "@/lib/api";
@@ -25,20 +26,16 @@ function SynthesisLoader({
   cves,
   trivyLogs,
   imageRef,
+  stats,
+  tokenFragment,
 }: {
   agentSteps: import("@/lib/types").AgentStep[];
   cves: import("@/lib/types").CveRecord[];
   trivyLogs: string[];
   imageRef: string;
+  stats: import("@/lib/types").RunStats;
+  tokenFragment: string;
 }) {
-  const total     = cves.length;
-  const synthesised = cves.filter((c) => c.status === "submitted" || c.status === "pending" || c.status === "approved" || c.status === "rejected").length;
-  const pct       = total > 0 ? Math.round((synthesised / total) * 100) : 0;
-
-  const sevCounts = cves.reduce<Record<string, number>>((acc, c) => {
-    acc[c.severity] = (acc[c.severity] ?? 0) + 1; return acc;
-  }, {});
-
   const stages = [
     { label: "Image Scan", done: true  },
     { label: "Ingest",     done: true  },
@@ -74,74 +71,14 @@ function SynthesisLoader({
         </div>
       </div>
 
-      {/* ── Synthesis progress ── */}
-      <div className="rounded-2xl overflow-hidden" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-        <div className="flex items-center gap-3 px-6 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
-          <span className="w-2 h-2 rounded-full animate-pulse flex-shrink-0" style={{ background: "var(--accent-purple)" }} />
-          <span className="text-[13px] font-semibold" style={{ color: "var(--accent-purple)" }}>
-            Master coordinating CVE assessment workers…
-          </span>
-          <span className="ml-auto text-[12px] font-mono font-bold" style={{ color: "var(--heading)" }}>
-            {synthesised} / {total}
-          </span>
+      {/* ── Live multi-agent mission control ── */}
+      {agentSteps.length === 0 && cves.length === 0 ? (
+        <div className="rounded-2xl px-6 py-8 text-center" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+          <p className="text-[12px]" style={{ color: "var(--dim)" }}>Dispatching agent workers…</p>
         </div>
-
-        {/* Progress bar */}
-        <div className="px-6 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px]" style={{ color: "var(--muted)" }}>CVEs synthesised</span>
-            <span className="text-[11px] font-bold" style={{ color: "var(--accent-purple)" }}>{pct}%</span>
-          </div>
-          <div className="h-2 rounded-full overflow-hidden" style={{ background: "var(--border)" }}>
-            <div className="h-full rounded-full transition-all duration-500"
-              style={{ width: `${pct}%`, background: "linear-gradient(90deg, var(--accent-purple), var(--accent-blue))" }} />
-          </div>
-          {/* Severity breakdown */}
-          {total > 0 && (
-            <div className="flex items-center gap-3 mt-3">
-              {[
-                { sev: "critical", color: "var(--accent-red)",    label: "C" },
-                { sev: "high",     color: "var(--accent-orange)", label: "H" },
-                { sev: "medium",   color: "var(--accent-yellow)", label: "M" },
-                { sev: "low",      color: "var(--accent-green)",  label: "L" },
-              ].filter(s => sevCounts[s.sev]).map(s => (
-                <span key={s.sev} className="text-[11px] font-bold px-2 py-0.5 rounded"
-                  style={{ background: `${s.color}18`, color: s.color }}>
-                  {s.label} {sevCounts[s.sev]}
-                </span>
-              ))}
-              <span className="text-[11px] ml-auto" style={{ color: "var(--muted)" }}>
-                {imageRef}
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Live agent steps */}
-        <div className="px-6 py-4 flex flex-col gap-2 max-h-48 overflow-y-auto">
-          {agentSteps.length === 0 ? (
-            <p className="text-[12px]" style={{ color: "var(--dim)" }}>Waiting for agent steps…</p>
-          ) : (
-            [...agentSteps].reverse().slice(0, 8).map((step) => (
-              <div key={step.id} className="flex items-start gap-2.5">
-                <span className="text-[10px] mt-0.5 flex-shrink-0" style={{
-                  color: step.state === "done" ? "var(--accent-green)" : "var(--accent-purple)"
-                }}>
-                  {step.state === "done" ? "✓" : "●"}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[11.5px] font-medium leading-tight truncate" style={{ color: "var(--body)" }}>
-                    {step.title}
-                  </p>
-                  {step.desc && (
-                    <p className="text-[10px] mt-0.5 truncate" style={{ color: "var(--muted)" }}>{step.desc}</p>
-                  )}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+      ) : (
+        <MissionControl agentSteps={agentSteps} cves={cves} tokenFragment={tokenFragment} stats={stats} imageRef={imageRef} />
+      )}
 
       {/* ── Scanner log summary ── */}
       {trivyLogs.length > 0 && (
@@ -332,6 +269,9 @@ function ReviewContent({ runId }: { runId: string | null }) {
   }, [runId, showToast]);
 
   // ── Derived ───────────────────────────────────────────────────────────────
+  // Keep the live mission-control view up for the whole synthesis phase — not
+  // just the first SSE tick — so the agent's work is actually visible.
+  const synthesizing = agentStatus === "running" && cves.some((c) => c.status === "queued");
   const selectedCve = cves.find((c) => cveKey(c) === selectedId) ?? cves[0];
   const reviewedCount = useMemo(
     () => cves.filter((c) => c.status === "approved" || c.status === "rejected").length,
@@ -438,12 +378,14 @@ function ReviewContent({ runId }: { runId: string | null }) {
               </div>
             </div>
           </div>
-        ) : loading ? (
+        ) : loading || synthesizing ? (
           <SynthesisLoader
             agentSteps={agentSteps}
             cves={cves}
             trivyLogs={trivyLogs}
             imageRef={imageRef}
+            stats={liveStats}
+            tokenFragment={tokenFragment}
           />
         ) : (
           <>
