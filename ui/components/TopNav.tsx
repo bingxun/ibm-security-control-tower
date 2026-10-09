@@ -31,7 +31,7 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
 
   return (
     <nav
-      className="h-14 flex items-center px-6 gap-4 flex-shrink-0"
+      className="h-14 flex items-center px-3 sm:px-6 gap-2 sm:gap-4 flex-shrink-0"
       style={{
         background: "var(--bg-nav)",
         borderBottom: "1px solid var(--border)",
@@ -51,20 +51,20 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
           <div className="text-[13px] font-bold leading-none" style={{ color: "var(--heading)" }}>
             Control Tower
           </div>
-          <div className="text-[11px] leading-none mt-0.5" style={{ color: "var(--muted)" }}>
+          <div className="hidden sm:block text-[11px] leading-none mt-0.5" style={{ color: "var(--muted)" }}>
             Security Review
           </div>
         </div>
       </div>
 
-      <div className="w-px h-6 mx-1" style={{ background: "var(--border)" }} />
+      <div className="hidden sm:block w-px h-6 mx-1" style={{ background: "var(--border)" }} />
 
-      {/* Breadcrumb */}
+      {/* Breadcrumb — hidden on phones to keep the nav single-line */}
       {isDashboard && (
-        <span className="text-[13px] font-semibold" style={{ color: "var(--heading)" }}>Dashboard</span>
+        <span className="hidden sm:inline text-[13px] font-semibold" style={{ color: "var(--heading)" }}>Dashboard</span>
       )}
       {isNewScan && (
-        <div className="flex items-center gap-2">
+        <div className="hidden sm:flex items-center gap-2">
           <Link href="/dashboard" className="flex items-center gap-1.5 text-[12px] transition-opacity hover:opacity-70" style={{ color: "var(--muted)" }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
             Dashboard
@@ -74,7 +74,7 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
         </div>
       )}
       {isReview && (
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="hidden sm:flex items-center gap-2 min-w-0">
           <Link href="/dashboard" className="flex items-center gap-1.5 text-[12px] transition-opacity hover:opacity-70 flex-shrink-0" style={{ color: "var(--muted)" }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
             Dashboard
@@ -95,7 +95,7 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
         </div>
       )}
       {isSettings && (
-        <div className="flex items-center gap-2">
+        <div className="hidden sm:flex items-center gap-2">
           <Link href="/dashboard" className="flex items-center gap-1.5 text-[12px] transition-opacity hover:opacity-70" style={{ color: "var(--muted)" }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
             Dashboard
@@ -111,17 +111,18 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
       {(isReview || isDashboard) && permissions?.canScan && (
         <Link
           href="/new-scan"
-          className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-[12px] font-semibold transition-opacity hover:opacity-80"
+          className="flex items-center gap-2 px-2.5 sm:px-4 py-1.5 rounded-lg text-[12px] font-semibold transition-opacity hover:opacity-80"
           style={{
             background: "var(--surface2)",
             border: "1px solid var(--border)",
             color: "var(--faint)",
           }}
+          title="New scan"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
             <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
-          New scan
+          <span className="hidden sm:inline">New scan</span>
         </Link>
       )}
 
@@ -129,7 +130,7 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
       {!isSettings && permissions?.canViewSettings && (
         <Link
           href="/settings"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-opacity hover:opacity-80"
+          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-opacity hover:opacity-80"
           style={{
             background: "var(--surface2)",
             border: "1px solid var(--border)",
@@ -141,13 +142,12 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
             <circle cx="12" cy="12" r="3"/>
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
           </svg>
-          Settings
+          <span className="hidden sm:inline">Settings</span>
         </Link>
       )}
 
-      {/* Command palette (⌘K) — the floating assistant lives in the root layout
-          so it persists across page navigation. */}
-      <CommandPalette />
+      {/* Command palette (⌘K) — keyboard-driven, so phone-only space is better spent elsewhere. */}
+      <span className="hidden sm:block"><CommandPalette /></span>
 
       {/* Theme switcher */}
       <ThemeSwitcher />
@@ -162,14 +162,15 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
         }[agentStatus];
         return (
           <div
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[12px] font-medium"
+            className="flex items-center gap-2 px-2 sm:px-3 py-1.5 rounded-lg text-[12px] font-medium"
             style={{ background: cfg.bg, border: `1px solid ${cfg.bdr}`, color: cfg.color }}
+            title={cfg.label}
           >
             <span
               className={`w-2 h-2 rounded-full flex-shrink-0${cfg.pulse ? " animate-pulse" : ""}`}
               style={{ background: cfg.dot, boxShadow: `0 0 6px ${cfg.dot}` }}
             />
-            {cfg.label}
+            <span className="hidden sm:inline">{cfg.label}</span>
           </div>
         );
       })()}

@@ -192,7 +192,7 @@ export default function CveReview({
           }} />
       )}
 
-      <main className="flex-1 min-h-0 overflow-y-auto px-8 py-7 space-y-6"
+      <main className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-8 py-5 sm:py-7 space-y-6"
         style={{ background: "var(--bg)", overscrollBehavior: "contain" }}>
 
         {/* ── Agent auto-approval hero (the learning loop paid off) ── */}

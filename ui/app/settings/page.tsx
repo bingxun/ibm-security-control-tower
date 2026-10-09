@@ -739,14 +739,14 @@ function SettingsPageInner() {
     <div className="flex flex-col h-screen overflow-hidden" style={{ background: "var(--bg)", color: "var(--heading)" }}>
       <TopNav />
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
+      <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
+        {/* Sidebar — horizontal tab strip on phones, vertical rail on lg+ */}
         <aside
-          className="w-52 flex-shrink-0 flex flex-col py-4 gap-0.5 overflow-y-auto"
-          style={{ background: "var(--bg-nav)", borderRight: "1px solid var(--border)" }}
+          className="w-full lg:w-52 flex-shrink-0 flex flex-row lg:flex-col gap-1 lg:gap-0.5 py-2 lg:py-4 overflow-x-auto lg:overflow-y-auto border-solid border-[color:var(--border)] border-b lg:border-b-0 lg:border-r"
+          style={{ background: "var(--bg-nav)" }}
         >
           <p
-            className="px-5 pb-2 text-[10px] font-semibold uppercase tracking-wider"
+            className="hidden lg:block px-5 pb-2 text-[10px] font-semibold uppercase tracking-wider"
             style={{ color: "var(--muted)" }}
           >
             Settings
@@ -758,7 +758,7 @@ function SettingsPageInner() {
               <button
                 key={item.id}
                 onClick={() => setActive(item.id)}
-                className="mx-2 flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium text-left transition-colors"
+                className="mx-1 lg:mx-2 flex-shrink-0 whitespace-nowrap flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium text-left transition-colors"
                 style={{
                   background: isActive ? (isDanger ? "var(--accent-red-bg)" : "var(--surface2)") : "transparent",
                   color: isActive
@@ -779,7 +779,7 @@ function SettingsPageInner() {
         </aside>
 
         {/* Content */}
-        <main className="flex-1 overflow-y-auto px-8 py-7">
+        <main className="flex-1 overflow-y-auto px-4 sm:px-8 py-5 sm:py-7">
           <div className="max-w-4xl mx-auto">
             <ActiveSection />
           </div>

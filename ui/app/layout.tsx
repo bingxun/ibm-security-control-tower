@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { AuthProvider } from "@/lib/auth";
@@ -7,6 +7,12 @@ import AssistantChat from "@/components/AssistantChat";
 export const metadata: Metadata = {
   title: "Security Control Tower",
   description: "Agentic Cloud Security CVE Approval Dashboard",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 // Inline script runs before React hydrates — prevents theme flash.

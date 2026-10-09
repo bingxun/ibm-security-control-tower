@@ -68,7 +68,7 @@ export default function CveQueue({ cves, selectedId, onSelect }: Props) {
 
   return (
     <aside
-      className="w-56 flex-shrink-0 flex flex-col overflow-hidden"
+      className="w-full lg:w-56 flex-1 lg:flex-shrink-0 lg:flex-none flex flex-col overflow-hidden"
       style={{ background: "var(--bg-nav)", borderRight: "1px solid var(--border)" }}
     >
       {/* ── Header ── */}

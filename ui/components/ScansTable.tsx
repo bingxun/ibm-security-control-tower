@@ -122,7 +122,8 @@ export default function ScansTable({
         </div>
       )}
 
-      {!loading && !error && scans.length > 0 && (<>
+      {!loading && !error && scans.length > 0 && (
+      <div className="overflow-x-auto"><div className="min-w-[640px]">
         <div
           className="grid grid-cols-12 px-5 py-3 text-[11px] font-semibold uppercase tracking-wider"
           style={{ borderBottom: "1px solid var(--border)", color: "var(--muted)" }}
@@ -193,7 +194,8 @@ export default function ScansTable({
             </div>
           </div>
         ))}
-      </>)}
+      </div></div>
+      )}
     </div>
   );
 }

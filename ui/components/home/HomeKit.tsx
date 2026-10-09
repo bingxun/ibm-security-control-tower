@@ -21,7 +21,7 @@ export function HomeShell({ children }: { children: ReactNode }) {
     <div className="flex flex-col h-screen overflow-hidden" style={{ background: "var(--bg)", color: "var(--heading)" }}>
       <TopNav />
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-5xl mx-auto px-8 py-8 flex flex-col gap-8">
+        <div className="max-w-5xl mx-auto px-4 sm:px-8 py-6 sm:py-8 flex flex-col gap-6 sm:gap-8">
           {children}
         </div>
       </div>
@@ -105,7 +105,8 @@ export function StatCard({ value, label, sub, color, icon }: { value: string; la
 }
 
 export function StatGrid({ children, cols = 4 }: { children: ReactNode; cols?: 3 | 4 }) {
-  return <div className={`grid gap-4 ${cols === 3 ? "grid-cols-3" : "grid-cols-4"}`}>{children}</div>;
+  // Stack to 2-up on phones, full column count from md up.
+  return <div className={`grid gap-4 grid-cols-2 ${cols === 3 ? "md:grid-cols-3" : "md:grid-cols-4"}`}>{children}</div>;
 }
 
 // ── Agent impact: quantifies what the autonomous triage saved ────────────────
@@ -199,7 +200,7 @@ export function PostureCard({ scans }: { scans: ScanSummary[] }) {
               return v > 0 ? <div key={s.key} title={`${s.label}: ${v}`} style={{ width: `${(v / sevTotal) * 100}%`, background: s.color }} /> : null;
             })}
           </div>
-          <div className="grid grid-cols-4 gap-2 mt-3.5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3.5">
             {SEV_DEF.map((s) => (
               <div key={s.key} className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: s.color }} />

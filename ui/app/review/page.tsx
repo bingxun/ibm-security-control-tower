@@ -44,7 +44,7 @@ function SynthesisLoader({
   ];
 
   return (
-    <div className="flex-1 overflow-y-auto flex flex-col gap-5 px-8 py-7" style={{ background: "var(--bg)" }}>
+    <div className="flex-1 overflow-y-auto flex flex-col gap-5 px-4 sm:px-8 py-5 sm:py-7" style={{ background: "var(--bg)" }}>
 
       {/* ── Pipeline stages ── */}
       <div className="rounded-2xl px-6 py-4 flex items-center gap-3"
@@ -122,6 +122,8 @@ function ReviewContent({ runId }: { runId: string | null }) {
   const [stats, setStats] = useState<RunStats>({ total: 0, approved: 0, rejected: 0, avgSynthesisS: 0, ragHits: 0, tokensUsed: 0 });
   const [tokenFragment, setTokenFragment] = useState("");
   const [selectedId, setSelectedId] = useState<string>("");
+  // Mobile master-detail: on phones show either the queue or the detail (lg+ shows both).
+  const [mobileView, setMobileView] = useState<"queue" | "detail">("queue");
   const [loading, setLoading] = useState(Boolean(runId));
   const [agentStatus, setAgentStatus] = useState<"running" | "awaiting" | "done" | "error">("running");
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
@@ -389,24 +391,39 @@ function ReviewContent({ runId }: { runId: string | null }) {
           />
         ) : (
           <>
-            <CveQueue
-              cves={cves}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-            />
-            {selectedCve && (
-              <CveReview
-                key={cveKey(selectedCve)}
-                runId={runId ?? undefined}
-                cve={selectedCve}
-                agentSteps={agentSteps}
-                tokenFragment={tokenFragment}
-                totalCves={cves.length}
-                reviewedCount={reviewedCount}
-                approvedCount={liveStats.approved}
-                onDecision={handleDecision}
+            {/* Queue — full width on phones (master view), fixed rail on lg+ */}
+            <div className={`${mobileView === "detail" ? "hidden" : "flex"} lg:flex w-full lg:w-auto flex-shrink-0 min-h-0`}>
+              <CveQueue
+                cves={cves}
+                selectedId={selectedId}
+                onSelect={(k) => { setSelectedId(k); setMobileView("detail"); }}
               />
-            )}
+            </div>
+            {/* Detail — hidden on phones while browsing the queue */}
+            <div className={`${mobileView === "queue" ? "hidden" : "flex"} lg:flex flex-1 min-w-0 min-h-0 flex-col`}>
+              {/* Mobile back-to-queue bar */}
+              <button
+                onClick={() => setMobileView("queue")}
+                className="lg:hidden flex items-center gap-2 px-4 py-2.5 text-[13px] font-semibold flex-shrink-0"
+                style={{ background: "var(--bg-nav)", borderBottom: "1px solid var(--border)", color: "var(--accent-blue)" }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6" /></svg>
+                Findings{cves.length ? ` (${cves.length})` : ""}
+              </button>
+              {selectedCve && (
+                <CveReview
+                  key={cveKey(selectedCve)}
+                  runId={runId ?? undefined}
+                  cve={selectedCve}
+                  agentSteps={agentSteps}
+                  tokenFragment={tokenFragment}
+                  totalCves={cves.length}
+                  reviewedCount={reviewedCount}
+                  approvedCount={liveStats.approved}
+                  onDecision={handleDecision}
+                />
+              )}
+            </div>
             <ContextPanel stats={liveStats} cves={cves} />
           </>
         )}

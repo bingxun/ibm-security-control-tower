@@ -37,18 +37,19 @@ export default function ThemeSwitcher() {
       {/* Trigger */}
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-opacity hover:opacity-80"
+        className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-lg text-[12px] font-medium transition-opacity hover:opacity-80"
         style={{
           background: "var(--surface2)",
           border:     "1px solid var(--border)",
           color:      "var(--faint)",
         }}
+        title={`Theme: ${current.label}${isAuto ? " (Auto)" : ""}`}
       >
         <span>{current.icon}</span>
-        <span>{current.label}</span>
+        <span className="hidden sm:inline">{current.label}</span>
         {isAuto && (
           <span
-            className="text-[9px] font-bold px-1 py-0.5 rounded uppercase tracking-wide"
+            className="hidden sm:inline-block text-[9px] font-bold px-1 py-0.5 rounded uppercase tracking-wide"
             style={{ background: "var(--accent-blue-bg)", color: "var(--accent-blue)", border: "1px solid rgba(68,147,248,0.2)" }}
           >
             Auto
