@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import RequireAuth from "@/components/RequireAuth";
+import { useAuth } from "@/lib/auth";
+import { canSeeAnalytics } from "@/lib/types";
 import { HomeShell, StatCard, StatGrid } from "@/components/home/HomeKit";
 import { HBarChart, AreaChart, ChartCard } from "@/components/analytics/charts";
-import { listScans, getDashboardStats, type ScanSummary, type DashboardStats } from "@/lib/api";
+import { listScans, listProjects, getDashboardStats, type ScanSummary, type Project, type DashboardStats } from "@/lib/api";
 
 const EMPTY: DashboardStats = { totalScans: 0, cvesTriaged: 0, avgApprovalRate: 0, ragDecisions: 0, ragFirstPassRate: 0, autoApproved: 0 };
 
@@ -14,19 +17,30 @@ const fmtDate = (iso: string) => {
 };
 
 function AnalyticsInner() {
+  const { user } = useAuth();
+  const router = useRouter();
+  const allowed = canSeeAnalytics(user?.roles ?? []);
+
   const [scans, setScans] = useState<ScanSummary[]>([]);
   const [stats, setStats] = useState<DashboardStats>(EMPTY);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Role gate: analytics is for operational roles only — bounce anyone else home.
   useEffect(() => {
+    if (user && !allowed) router.replace("/dashboard");
+  }, [user, allowed, router]);
+
+  useEffect(() => {
+    if (!allowed) return;
     let cancelled = false;
-    Promise.all([listScans(), getDashboardStats()])
-      .then(([s, d]) => { if (!cancelled) { setScans(s); setStats(d); } })
+    Promise.all([listScans(), getDashboardStats(), listProjects().catch(() => [])])
+      .then(([s, d, p]) => { if (!cancelled) { setScans(s); setStats(d); setProjects(p as Project[]); } })
       .catch((e) => { if (!cancelled) setError(e?.message ?? "Failed to load analytics"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [allowed]);
 
   const severity = useMemo(() => {
     let c = 0, h = 0, m = 0, l = 0;
@@ -57,21 +71,26 @@ function AnalyticsInner() {
   }, [scans]);
 
   const byProject = useMemo(() => {
+    const nameOf = new Map(projects.map((p) => [p.id, p.name]));
     const map = new Map<string, number>();
     for (const s of scans) map.set(s.project, (map.get(s.project) ?? 0) + s.totalCves);
     const sorted = [...map.entries()].sort(([, a], [, b]) => b - a);
     const top = sorted.slice(0, 8);
     const rest = sorted.slice(8).reduce((n, [, v]) => n + v, 0);
-    const rows = top.map(([label, value]) => ({ label, value, color: "var(--accent-blue)" }));
+    const rows = top.map(([id, value]) => ({ label: nameOf.get(id) ?? id, value, color: "var(--accent-blue)" }));
     if (rest > 0) rows.push({ label: "Other", value: rest, color: "var(--dim)" });
     return rows;
-  }, [scans]);
+  }, [scans, projects]);
 
   const autonomyPct = stats.cvesTriaged > 0 ? Math.round((stats.autoApproved / stats.cvesTriaged) * 100) : 0;
 
   return (
     <HomeShell>
       <div>
+        <a href="/dashboard" className="inline-flex items-center gap-1.5 text-[12px] font-semibold mb-2 transition-opacity hover:opacity-70" style={{ color: "var(--accent-blue)" }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6" /></svg>
+          Back to dashboard
+        </a>
         <h1 className="text-[26px] font-black tracking-tight" style={{ color: "var(--heading)" }}>Analytics</h1>
         <p className="text-[14px] mt-1" style={{ color: "var(--subtle)" }}>Scan volume, finding severity, and review throughput across your assigned projects.</p>
       </div>

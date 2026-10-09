@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import ScansTable from "@/components/ScansTable";
 import { useAuth } from "@/lib/auth";
+import { canSeeAnalytics } from "@/lib/types";
 import {
   listScans, getDashboardStats, listProjects, listUsers,
   type ScanSummary, type DashboardStats, type Project, type PlatformUser,
@@ -136,7 +137,7 @@ export default function Home() {
           {p.canManageProjects && <ActionTile href="/settings" title="Manage projects" desc="Create projects and assign access" accent="var(--accent-blue)" icon={ProjIcon} />}
           {p.canScan && <ActionTile href="/new-scan" title="New scan" desc="Scan a container image for CVEs" accent="var(--accent-purple)" icon={PlusIcon} />}
           {p.canApprove && <ActionTile href="/review" title="Review queue" desc="Approve or reject pending findings" accent="var(--accent-green)" icon={ReviewIcon} />}
-          <ActionTile href="/analytics" title="Analytics" desc="Scan volume, severity, and review trends" accent="var(--accent-purple)" icon={ChartIcon} />
+          {canSeeAnalytics(user?.roles ?? []) && <ActionTile href="/analytics" title="Analytics" desc="Scan volume, severity, and review trends" accent="var(--accent-purple)" icon={ChartIcon} />}
           {p.canViewSettings && <ActionTile href="/settings" title="Settings" desc="Profile and preferences" accent="var(--accent-blue)" icon={GearIcon} />}
         </div>
       </section>

@@ -1,18 +1,21 @@
 "use client";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import ThemeSwitcher from "./ThemeSwitcher";
 import CommandPalette from "./CommandPalette";
 import { useAuth } from "@/lib/auth";
+import { listProjects, type Project } from "@/lib/api";
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/types";
 
 interface Props {
   agentStatus?: "running" | "awaiting" | "done" | "error";
   projectId?: string;
   imageRef?: string;
+  scanSeq?: number;
 }
 
-export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
+export default function TopNav({ agentStatus, projectId, imageRef, scanSeq }: Props) {
   const path       = usePathname();
   const router     = useRouter();
   const { user, permissions, logout } = useAuth();
@@ -21,6 +24,18 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
   const isNewScan   = path?.startsWith("/new-scan");
   const isDashboard = path?.startsWith("/dashboard");
   const isSettings  = path?.startsWith("/settings");
+  const isAnalytics = path?.startsWith("/analytics");
+
+  // Resolve the project UUID to its human name for the review breadcrumb.
+  const [projectName, setProjectName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    listProjects()
+      .then((ps: Project[]) => { if (!cancelled) setProjectName(ps.find((p) => p.id === projectId)?.name ?? null); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [projectId]);
 
   const handleLogout = () => {
     logout();
@@ -37,8 +52,8 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
         borderBottom: "1px solid var(--border)",
       }}
     >
-      {/* Brand */}
-      <div className="flex items-center gap-3">
+      {/* Brand — links home to the dashboard */}
+      <Link href="/dashboard" className="flex items-center gap-3 transition-opacity hover:opacity-80">
         <div
           className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
           style={{ background: "linear-gradient(135deg, #f97316 0%, #dc2626 100%)" }}
@@ -55,7 +70,7 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
             Security Review
           </div>
         </div>
-      </div>
+      </Link>
 
       <div className="hidden sm:block w-px h-6 mx-1" style={{ background: "var(--border)" }} />
 
@@ -80,8 +95,8 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
             Dashboard
           </Link>
           <span style={{ color: "var(--dim)" }}>/</span>
-          <span className="text-[11px] font-mono px-2 py-1 rounded flex-shrink-0" style={{ background: "var(--surface2)", color: "var(--accent-blue)", border: "1px solid var(--border)" }}>
-            {projectId || "—"}
+          <span className="text-[12px] font-semibold px-2 py-1 rounded flex-shrink-0 truncate max-w-[200px]" style={{ background: "var(--surface2)", color: "var(--accent-blue)", border: "1px solid var(--border)" }} title={projectName ?? projectId}>
+            {projectName ?? projectId ?? "—"}{typeof scanSeq === "number" ? ` · #${scanSeq}` : ""}
           </span>
           {imageRef && (
             <>
@@ -92,6 +107,16 @@ export default function TopNav({ agentStatus, projectId, imageRef }: Props) {
             </>
           )}
           <span className="text-[12px] flex-shrink-0" style={{ color: "var(--muted)" }}>Review</span>
+        </div>
+      )}
+      {isAnalytics && (
+        <div className="hidden sm:flex items-center gap-2">
+          <Link href="/dashboard" className="flex items-center gap-1.5 text-[12px] transition-opacity hover:opacity-70" style={{ color: "var(--muted)" }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+            Dashboard
+          </Link>
+          <span style={{ color: "var(--dim)" }}>/</span>
+          <span className="text-[12px] font-semibold" style={{ color: "var(--heading)" }}>Analytics</span>
         </div>
       )}
       {isSettings && (

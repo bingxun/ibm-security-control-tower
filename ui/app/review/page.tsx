@@ -10,7 +10,7 @@ import ContextPanel from "@/components/ContextPanel";
 import MissionControl from "@/components/MissionControl";
 
 import { CveRecord, AgentStep, RunStats, DecisionExtra, cveKey } from "@/lib/types";
-import { streamRun, submitDecision, getRun, applyBaselines, type ScanRun } from "@/lib/api";
+import { streamRun, submitDecision, getRun, applyBaselines, listScans, type ScanRun } from "@/lib/api";
 
 type Decision = "approved" | "rejected" | "submitted" | "changes_requested";
 const DECISION_TOAST: Record<Decision, string> = {
@@ -132,6 +132,7 @@ function ReviewContent({ runId }: { runId: string | null }) {
   const [runError, setRunError] = useState<string | null>(null);
   const [projectId, setProjectId] = useState<string>("");
   const [imageRef, setImageRef] = useState<string>("");
+  const [scanSeq, setScanSeq] = useState<number | undefined>(undefined);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   const streamCleanup = useRef<(() => void) | null>(null);
@@ -141,6 +142,16 @@ function ReviewContent({ runId }: { runId: string | null }) {
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [trivyLogs]);
+
+  // Resolve this run's scan number (#seq) for the breadcrumb.
+  useEffect(() => {
+    if (!runId) return;
+    let cancelled = false;
+    listScans()
+      .then((rows) => { if (!cancelled) { const m = rows.find((r) => r.id === runId); if (m) setScanSeq(m.seq); } })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [runId]);
 
   // ── Toast helper ─────────────────────────────────────────────────────────
   const showToast = useCallback((msg: string, type: "success" | "error") => {
@@ -289,7 +300,7 @@ function ReviewContent({ runId }: { runId: string | null }) {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-bg text-text">
-      <TopNav agentStatus={agentStatus} projectId={projectId} imageRef={imageRef} />
+      <TopNav agentStatus={agentStatus} projectId={projectId} imageRef={imageRef} scanSeq={scanSeq} />
 
       {/* Toast */}
       {toast && (

@@ -55,6 +55,14 @@ export const ROLE_PERMISSIONS: Record<UserRole, RolePermissions> = {
   DSO_MANAGER:     { canScan: true,  canApprove: true,  canReject: false, canSubmitForApproval: false, canApproveSubmitted: false, canViewSettings: true,  canManageUsers: false, canManageProjects: true  },
 };
 
+// Analytics is for the operational roles who own scans and reviews — DevOps,
+// DSO Manager, Cyber Manager (plus Super Admin). Data stays project-scoped by
+// the backend regardless; this just controls who sees the page.
+export const ANALYTICS_ROLES: UserRole[] = ["SUPER_ADMIN", "DEVOPS_ENGINEER", "DSO_MANAGER", "CYBER_MANAGER"];
+export function canSeeAnalytics(roles: UserRole[] = []): boolean {
+  return roles.some((r) => ANALYTICS_ROLES.includes(r));
+}
+
 export const ROLE_LABELS: Record<UserRole, string> = {
   SUPER_ADMIN:     "Super Admin",
   ADMIN:           "Admin",
