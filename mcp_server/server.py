@@ -1,5 +1,5 @@
 """
-MCP Server — Agentic Cloud Security Control Tower
+Memory Server — Agentic Cloud Security Control Tower
 Exposes tools to Bob / LLM agents:
   query_memory      — semantic search over past CVE decisions
   persist_decision  — store a new approved/rejected decision

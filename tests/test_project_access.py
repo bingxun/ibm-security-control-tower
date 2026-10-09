@@ -158,7 +158,7 @@ class ProjectAccessTests(unittest.TestCase):
             db.create_run(f'private-{index}', 'private-image', self.b)
         self.assertEqual([r['id'] for r in self.client.get('/scans', headers=self.users['ADMIN'][1]).json()], ['run-a'])
 
-    def test_mcp_memory_tools_enforce_sessions_and_project_membership(self):
+    def test_memory_tools_enforce_sessions_and_project_membership(self):
         from mcp_server.server import query_memory_tool, persist_decision_tool, memory_stats_tool
         user, headers = self.users['DEVOPS_ENGINEER']
         token = headers['Authorization'].split(' ', 1)[1]

@@ -75,10 +75,10 @@ Omit `trivyJson` to use the built-in 5-CVE demo dataset.
 
 ---
 
-## MCP server (for Claude Desktop / other agents)
+## Memory server (for Claude Desktop / other agents)
 
 ```bash
-# Run as stdio MCP server
+# Run the memory server (stdio)
 python -m mcp_server.server
 ```
 
@@ -152,7 +152,7 @@ New Scan only offers accessible projects; the dashboard can filter accessible pr
 Private RAG lookup is restricted to the current project. Explicitly published Cyber Manager baselines are shared references across projects. Historical generated rationale and logs may
 contain cross-project context, so pre-migration generated content is visible only to Super Admin.
 Raw historical findings remain available to assigned users; run a new scan for isolated analysis.
-MCP memory tools require a valid `session_token` and project access; they no longer provide
+Memory tools require a valid `session_token` and project access; they no longer provide
 unauthenticated global memory access.
 
 Validation:
