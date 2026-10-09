@@ -43,6 +43,7 @@ class AgentState(TypedDict):
     environment_markdown: str
     cis_profile: str
     severity_threshold: str    # critical | high | medium | low — filter applied at ingest
+    severities: list[str]      # explicit severities to keep; when non-empty it overrides severity_threshold
     scanner: str               # trivy | grype — determines JSON parser in ingest node
     scan_json: dict            # raw scanner JSON (Trivy or Grype format)
     # Agentic auto-approval ceiling: findings at or below this severity that match

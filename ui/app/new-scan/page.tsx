@@ -15,31 +15,11 @@ interface ScanForm {
   projectId: string;
   cloudProvider: string;
 
-  cisProfile: string;
-
-  severityThreshold: "critical" | "high" | "medium" | "low";
-  scanner: "trivy" | "grype";
-  // Severity ceiling for agentic auto-approval of findings matching a published baseline.
-  autoApproveBelow: "none" | "low" | "medium" | "high";
+  severities: ("critical" | "high" | "medium" | "low")[];
 }
-
-const AUTO_APPROVE_OPTS = [
-  { value: "none",   label: "Off" },
-  { value: "low",    label: "Up to Low" },
-  { value: "medium", label: "Up to Medium" },
-  { value: "high",   label: "Up to High" },
-] as const;
 
 const REGISTRIES = ["docker.io", "ghcr.io", "icr.io", "quay.io", "custom"];
 const CLOUD_PROVIDERS = ["IBM Cloud", "AWS", "Azure", "GCP", "On-prem"];
-const CIS_PROFILES = [
-  "Cyber Manager policy baseline",
-  "CIS Docker Benchmark v1.6",
-  "CIS Kubernetes Benchmark v1.8",
-  "CIS IBM Cloud Foundations v1.0",
-  "NIST SP 800-190",
-  "Custom / Upload",
-];
 const SEVERITY_LEVELS = ["critical", "high", "medium", "low"] as const;
 
 // ── Micro-components ───────────────────────────────────────────────────────
@@ -192,10 +172,7 @@ function NewScanPageInner() {
     tag: "latest",
     projectId: "",
     cloudProvider: "IBM Cloud",
-    cisProfile: "CIS Docker Benchmark v1.6",
-    severityThreshold: "high",
-    scanner: "trivy",
-    autoApproveBelow: "high",
+    severities: ["critical", "high", "medium", "low"],   // all severities by default
   });
 
   const [environmentMarkdown, setEnvironmentMarkdown] = useState("");
@@ -259,6 +236,7 @@ function NewScanPageInner() {
     !imageRefError &&
     projects.some(project => project.id === form.projectId) &&
     !projectsLoading && !projectsError &&
+    form.severities.length > 0 &&
     !launching;
 
   const handleLaunch = async () => {
@@ -270,11 +248,10 @@ function NewScanPageInner() {
       const { run_id } = await startScan({
         imageRef: resolvedRef,
         projectId: form.projectId,
-        cisProfile: form.cisProfile,
         environmentMarkdown,
-        severityThreshold: form.severityThreshold,
-        scanner: form.scanner,
-        autoApproveBelow: form.autoApproveBelow,
+        // lowest picked level kept for older API consumers; `severities` is what the backend filters on
+        severityThreshold: SEVERITY_LEVELS.filter((x) => form.severities.includes(x)).pop() ?? "high",
+        severities: form.severities,
         // no trivyJson — backend runs Trivy itself
       });
       router.push(`/review?run=${run_id}`);
@@ -437,29 +414,6 @@ function NewScanPageInner() {
             </div>
           </SectionCard>
 
-          {/* ── 3. Policy ── */}
-          <SectionCard
-            icon={
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-yellow)" strokeWidth="2">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-              </svg>
-            }
-            title="Compliance Policy"
-            subtitle="CIS benchmark applied to validate controls"
-          >
-            <div className="flex flex-col gap-4">
-              <div>
-                <Label>CIS Profile</Label>
-                <Select
-                  value={form.cisProfile}
-                  onChange={(v) => set("cisProfile", v)}
-                  options={CIS_PROFILES}
-                  disabled={launching}
-                />
-              </div>
-
-            </div>
-          </SectionCard>
 
           <SectionCard icon={<span aria-hidden="true">▤</span>} title="Environment & infrastructure" subtitle="Upload Markdown describing deployment, network exposure and security controls (maximum 100 KB).">
             <label className="flex flex-col gap-3 text-[13px]">
@@ -493,54 +447,12 @@ function NewScanPageInner() {
               </svg>
             }
             title="Scan Options"
-            subtitle="Control what the scanner looks for and how the agent handles results"
+            subtitle="Choose which severities to scan for"
           >
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-              {/* Scanner */}
-              <div>
-                <Label>Scanner</Label>
-                <div className="flex flex-col gap-2">
-                  {(["trivy", "grype"] as const).map((s) => (
-                    <label
-                      key={s}
-                      className="flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-colors"
-                      style={{
-                        background: form.scanner === s ? "var(--accent-blue-bg)" : "var(--surface2)",
-                        border: `1px solid ${form.scanner === s ? "var(--accent-blue)" : "var(--border)"}`,
-                        opacity: launching ? 0.5 : 1,
-                      }}
-                    >
-                      <input
-                        type="radio"
-                        name="scanner"
-                        value={s}
-                        checked={form.scanner === s}
-                        onChange={() => set("scanner", s)}
-                        className="hidden"
-                        disabled={launching}
-                      />
-                      <div
-                        className="w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0"
-                        style={{ borderColor: form.scanner === s ? "var(--accent-blue)" : "var(--border2)" }}
-                      >
-                        {form.scanner === s && (
-                          <div className="w-2 h-2 rounded-full" style={{ background: "var(--accent-blue)" }} />
-                        )}
-                      </div>
-                      <div>
-                        <div className="text-[12px] font-semibold capitalize" style={{ color: "var(--heading)" }}>{s}</div>
-                        <div className="text-[10px]" style={{ color: "var(--muted)" }}>
-                          {s === "trivy" ? "Aqua Security" : "Anchore"}
-                        </div>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
+            <div className="grid grid-cols-1 gap-5">
               {/* Minimum severity */}
               <div>
-                <Label>Minimum severity</Label>
+                <Label>Severities to scan (pick one or more)</Label>
                 <div className="flex flex-col gap-2">
                   {SEVERITY_LEVELS.map((sev) => {
                     const color =
@@ -548,7 +460,7 @@ function NewScanPageInner() {
                       sev === "high"     ? "var(--accent-orange)" :
                       sev === "medium"   ? "var(--accent-yellow)" :
                                            "var(--accent-green)";
-                    const isSelected = form.severityThreshold === sev;
+                    const isSelected = form.severities.includes(sev);
                     return (
                       <label
                         key={sev}
@@ -560,74 +472,35 @@ function NewScanPageInner() {
                         }}
                       >
                         <input
-                          type="radio"
+                          type="checkbox"
                           name="severity"
                           value={sev}
                           checked={isSelected}
-                          onChange={() => set("severityThreshold", sev as ScanForm["severityThreshold"])}
+                          onChange={() =>
+                            set(
+                              "severities",
+                              isSelected
+                                ? form.severities.filter((x) => x !== sev)
+                                : [...form.severities, sev],
+                            )
+                          }
                           className="hidden"
                           disabled={launching}
                         />
                         <div
-                          className="w-3.5 h-3.5 rounded-full flex-shrink-0"
+                          className="w-3.5 h-3.5 rounded flex-shrink-0"
                           style={{ background: isSelected ? color : "var(--border2)" }}
                         />
                         <span
                           className="text-[12px] font-semibold capitalize"
                           style={{ color: isSelected ? color : "var(--subtle)" }}
                         >
-                          {sev}+
+                          {sev}
                         </span>
                       </label>
                     );
                   })}
                 </div>
-              </div>
-
-              {/* Agentic auto-approval from published baselines */}
-              <div>
-                <Label>Auto-approve from baselines</Label>
-                <div className="flex flex-col gap-2 mb-3">
-                  {AUTO_APPROVE_OPTS.map((opt) => {
-                    const isSelected = form.autoApproveBelow === opt.value;
-                    return (
-                      <label
-                        key={opt.value}
-                        className="flex items-center gap-3 px-3 py-2 rounded-xl cursor-pointer"
-                        style={{
-                          background: isSelected ? "var(--accent-green-bg)" : "var(--surface2)",
-                          border: `1px solid ${isSelected ? "var(--accent-green-bdr)" : "var(--border)"}`,
-                          opacity: launching ? 0.5 : 1,
-                        }}
-                      >
-                        <input
-                          type="radio"
-                          name="auto"
-                          value={opt.value}
-                          checked={isSelected}
-                          onChange={() => set("autoApproveBelow", opt.value)}
-                          className="hidden"
-                          disabled={launching}
-                        />
-                        <div
-                          className="w-3.5 h-3.5 rounded-full flex-shrink-0"
-                          style={{ background: isSelected ? "var(--accent-green)" : "var(--border2)" }}
-                        />
-                        <div className="text-[12px] font-semibold" style={{ color: isSelected ? "var(--accent-green)" : "var(--subtle)" }}>
-                          {opt.label}
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
-                {form.autoApproveBelow !== "none" && (
-                  <div
-                    className="flex items-start gap-2 p-2.5 rounded-lg text-[11px] leading-relaxed"
-                    style={{ background: "var(--accent-green-bg)", border: "1px solid var(--accent-green-bdr)", color: "var(--accent-green)" }}
-                  >
-                    ◈ The agent auto-approves findings at or below this severity that match a Cyber Manager–published baseline (same CVE &amp; package). Criticals and unmatched findings still go to human review, and every auto-approval is recorded in the finding&apos;s history.
-                  </div>
-                )}
               </div>
             </div>
           </SectionCard>
@@ -659,12 +532,12 @@ function NewScanPageInner() {
                     {resolvedRef}
                   </span>
                   {" "}for{" "}
-                  <span style={{ color: "var(--heading)" }}>{form.severityThreshold}+</span> severity CVEs
+                  <span style={{ color: "var(--heading)" }}>{SEVERITY_LEVELS.filter((x) => form.severities.includes(x)).join(", ")}</span> severity CVEs
                 </p>
               ) : (
                 <p className="text-[13px]" style={{ color: "var(--muted)" }}>
                   Fill in <span style={{ color: "var(--heading)" }}>Image name</span> and{" "}
-                  <span style={{ color: "var(--heading)" }}>Project</span> to launch
+                  <span style={{ color: "var(--heading)" }}>Project</span> to launch and pick at least one severity
                 </p>
               )}
             </div>

@@ -66,6 +66,7 @@ def ingest_node(state: AgentState) -> dict:
     trivy = state["scan_json"]
     threshold = state.get("severity_threshold", "high")
     threshold_rank = _SEV_ORDER.get(threshold, 1)   # default: high (rank 1)
+    severities = {s for s in state.get("severities", []) if s in _SEV_ORDER}
 
     all_records: list[CveRecord] = []
 
@@ -96,8 +97,12 @@ def ingest_node(state: AgentState) -> dict:
                 )
             )
 
-    # Apply severity threshold filter (rank 0=critical, 1=high, 2=medium, 3=low)
-    records = [r for r in all_records if _SEV_ORDER[r["severity"]] <= threshold_rank]
+    # Keep an explicit set of severities if given, else everything at/above the threshold
+    # (rank 0=critical, 1=high, 2=medium, 3=low)
+    if severities:
+        records = [r for r in all_records if r["severity"] in severities]
+    else:
+        records = [r for r in all_records if _SEV_ORDER[r["severity"]] <= threshold_rank]
 
     # Sort: critical first, then by CVSS descending
     records.sort(key=lambda r: (_SEV_ORDER[r["severity"]], -r["cvss"]))
@@ -108,7 +113,7 @@ def ingest_node(state: AgentState) -> dict:
     step = AgentStep(
         id="ingest",
         title=f"Parsed {len(records)} CVEs from Trivy scan",
-        desc=f"{state['image_ref']} · {len(records)} vulnerabilities · threshold={threshold}{skip_note} · {elapsed}s",
+        desc=f"{state['image_ref']} · {len(records)} vulnerabilities · {'severities=' + ','.join(sorted(severities, key=_SEV_ORDER.get)) if severities else 'threshold=' + threshold}{skip_note} · {elapsed}s",
         chips=[{"label": "parse_trivy_json", "variant": "done"}],
         state="done",
     )

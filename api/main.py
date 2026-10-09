@@ -93,6 +93,7 @@ class ScanRequest(BaseModel):
     projectId: str
     cisProfile: str = "CIS Docker Benchmark v1.6"
     severityThreshold: str = "high"
+    severities: Optional[list[str]] = None   # explicit picks, e.g. ["critical", "medium"]; overrides severityThreshold
     scanner: str = "trivy"
     autoApproveBelow: str = "none"
     trivyJson: Optional[dict] = None
@@ -374,6 +375,7 @@ async def _run_pipeline(run_id: str, image_ref: str, meta: dict) -> None:
             project_id=meta.get("projectId", ""),
             cis_profile=meta.get("cisProfile", "CIS Docker Benchmark v1.6"),
             severity_threshold=meta.get("severityThreshold", "high"),
+            severities=meta.get("severities"),
             scanner=meta.get("scanner", "trivy"),
             run_id=run_id,
             auto_approve_below=meta.get("autoApproveBelow", "none"),
@@ -590,7 +592,7 @@ async def start_scan(req: ScanRequest, user: dict = Depends(require_scanner)):
         project_id=req.projectId,
         cis_profile=req.cisProfile,
         scanner=req.scanner,
-        severity_threshold=req.severityThreshold,
+        severity_threshold=",".join(req.severities) if req.severities else req.severityThreshold,
     )
 
     with get_conn() as conn:

@@ -55,10 +55,11 @@ export async function downloadReport(runId: string, format: "csv" | "pdf"): Prom
 export interface ScanPayload {
   imageRef: string;
   projectId: string;
-  cisProfile: string;
+  cisProfile?: string;          // optional: the API falls back to its default profile
   severityThreshold: string;
-  scanner: string;
-  autoApproveBelow: string;
+  severities?: string[];
+  scanner?: string;             // optional: Trivy is the only scanner
+  autoApproveBelow?: string;    // optional: auto-approval is off unless set
   trivyJson?: object;
   environmentMarkdown?: string;
 }

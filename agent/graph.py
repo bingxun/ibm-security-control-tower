@@ -73,6 +73,7 @@ def make_initial_state(
     run_id: str | None = None,
     environment_markdown: str = "",
     auto_approve_below: str = "none",
+    severities: list[str] | None = None,
 ) -> AgentState:
     return AgentState(
         run_id=run_id or str(uuid.uuid4()),
@@ -81,6 +82,7 @@ def make_initial_state(
         cis_profile=cis_profile,
         environment_markdown=environment_markdown,
         severity_threshold=severity_threshold,
+        severities=[s.lower() for s in severities or []],
         scanner=scanner,
         scan_json=scan_json,
         auto_approve_below=auto_approve_below,
