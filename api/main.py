@@ -1001,8 +1001,9 @@ def project_report(project_id: str, template: bool = False, user: dict = Depends
 @app.post('/projects/{project_id}/report')
 def import_project_report(project_id: str, req: CsvImportRequest, user: dict = Depends(require_auth)):
     check_project(user, project_id)
-    if not _roles(user) & CYBER_APPROVER_ROLES:
-        raise HTTPException(403, 'Only Cyber Managers can import completed reviews')
+    # Any project member may upload. What each role may actually change is enforced per row by
+    # _validate_transition (DevOps can only submit; Admin/DSO approve pending; only Cyber
+    # approves submitted findings or rejects), so the upload cannot bypass the review workflow.
     rows = project_reports.parse(req.content)
     with REVIEW_LOCK:
         changes = []
@@ -1028,8 +1029,8 @@ def import_project_report(project_id: str, req: CsvImportRequest, user: dict = D
             if run['status'] != 'awaiting_approval':
                 raise HTTPException(409, f'Row {number}: run is not awaiting approval')
             _validate_transition(user,cve['status'],row['Status'])
-            if row['Status'] not in ('approved','rejected'):
-                raise HTTPException(422, f'Row {number}: completed reviews must be approved or rejected')
+            if row['Status'] not in ('submitted','approved','rejected'):
+                raise HTTPException(422, f'Row {number}: Status must be submitted, approved or rejected')
             if not row['Justification'].strip() or not row['Remediation'].strip():
                 raise HTTPException(422, f'Row {number}: justification and remediation are required')
             changes.append((run['run_id'],cve,row['Status'],row['Manual Notes'],row['Justification'],row['Remediation']))

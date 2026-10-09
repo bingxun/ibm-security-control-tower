@@ -21,11 +21,11 @@ export default function ProjectReports({ projectId, onImported }: { projectId: s
       <div><h2 className="text-[14px] font-bold">Project review file</h2><p className="text-[12px] mt-1" style={{ color: "var(--subtle)" }}>All image scans, CVEs, justifications and remediations in one CSV.</p></div>
       <div className="flex flex-wrap gap-2">
         <button className={styles.button} disabled={busy} onClick={() => void download()}>Download project CSV</button>
-        {permissions?.canApproveSubmitted && <button className={styles.button} disabled={busy} onClick={() => input.current?.click()}>Upload completed CSV</button>}
+        <button className={styles.button} disabled={busy} onClick={() => input.current?.click()}>Upload completed CSV</button>
         <button className={styles.button} disabled={busy} onClick={() => void download(true)}>CSV template</button>
       </div>
     </div>
-    {permissions?.canApproveSubmitted && <p className="text-[12px] mt-3" style={{ color: "var(--muted)" }}>Download the project file, set Status to approved or rejected, and complete Justification and Remediation. Keep Run ID, Image, CVE ID and Package unchanged. Upload saves all valid decisions together; publishing a shared baseline is a separate action on each approved CVE.</p>}
+    <p className="text-[12px] mt-3" style={{ color: "var(--muted)" }}>Download the project file, set Status to {permissions?.canApproveSubmitted ? "approved or rejected" : permissions?.canSubmitForApproval ? "submitted" : "approved"} for the findings you are deciding, and complete Justification and Remediation. Keep Run ID, Image, CVE ID and Package unchanged. Upload saves all valid changes together, and each row is checked against what your role may do; publishing a shared baseline is a separate action on each approved CVE.</p>
     <input ref={input} className="hidden" type="file" accept=".csv,text/csv" aria-label="Completed Cyber Manager CSV" disabled={busy} onChange={async e => {
       const file = e.target.files?.[0]; e.target.value = "";
       if (!file) return;
