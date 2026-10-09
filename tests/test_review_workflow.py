@@ -161,7 +161,13 @@ class ReviewWorkflowTests(unittest.TestCase):
         cve=db.get_cves('b')[0]
         async def synthesise():
             return await _synthesise_one(cve,self.b,'Cyber Manager policy baseline',asyncio.Semaphore(1),False)
-        self.assertIsNone(asyncio.run(synthesise())['cve'].get('rag_match'))
+        # Memory is shared across projects: project B now sees project A's approval as a reference
+        # (still pending, never auto-approved), without any published baseline.
+        seen=asyncio.run(synthesise())['cve']
+        self.assertEqual(seen['status'],'pending')
+        self.assertEqual(seen['rag_match']['project'],'Private Alpha')
+        self.assertFalse(seen['rag_match']['sameProject'])
+        self.assertIn('Project Private Alpha has approved this CVE before',seen['rag_match']['note'])
         self.assertEqual(self.client.post('/run/a/baseline',headers=self.auth['ADMIN'],json=body).status_code,403)
         response=self.client.post('/run/a/baseline',headers=self.auth['CYBER_MANAGER'],json=body)
         self.assertEqual(response.status_code,200)
@@ -173,7 +179,18 @@ class ReviewWorkflowTests(unittest.TestCase):
         public=self.client.get('/baselines',headers=self.auth['DEVOPS_ENGINEER']).text
         self.assertNotIn(self.a,public);self.assertNotIn('source_run',public)
         self.assertEqual(self.client.delete('/baselines/'+response.json()['id'],headers=self.auth['CYBER_MANAGER']).status_code,200)
-        self.assertIsNone(asyncio.run(synthesise())['cve'].get('rag_match'))
+        # withdrawn baseline is gone, but the project-A approval is still remembered
+        self.assertEqual(asyncio.run(synthesise())['cve']['rag_match']['project'],'Private Alpha')
+
+    def test_past_approvals_are_shared_across_projects(self):
+        from db import baselines
+        self.assertEqual(baselines.past_approvals(self.b,'CVE-2024-1','lib'),[])
+        self.assertEqual(self.decide().status_code,200)                       # approved in project A
+        other=baselines.past_approvals(self.b,'CVE-2024-1','lib')               # asked from project B
+        self.assertEqual([(h['project_name'],h['same_project'],h['image_ref']) for h in other],[('Private Alpha',False,'nginx:1')])
+        own=baselines.past_approvals(self.a,'CVE-2024-1','lib')                 # asked from project A
+        self.assertEqual([h['same_project'] for h in own],[True])
+        self.assertEqual(baselines.past_approvals(self.b,'CVE-2024-1','lib-utils'),[])   # other package: no match
 
     def test_partial_approval_is_available_within_project(self):
         self.assertEqual(self.decide().status_code,200)

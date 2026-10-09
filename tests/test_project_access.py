@@ -99,13 +99,19 @@ class ProjectAccessTests(unittest.TestCase):
         self.assertEqual(db.project_member_ids(self.b), ids)
         self.assertEqual(len(self.client.get('/projects', headers=self.users['ADMIN'][1]).json()), 2)
 
-    def test_rag_memory_does_not_cross_project_boundaries(self):
+    def test_rag_memory_is_carried_across_projects(self):
         with patch('rag.store.embed_text', return_value=[1., 0.]):
             for project in [self.a, self.b]:
-                store.persist_decision('CVE-test', project, 'high', project + '-secret', 'Reviewer', 'approved')
+                store.persist_decision('CVE-test', project, 'high', project + '-text', 'Reviewer', 'approved',
+                                       image_ref='img:1')
+            # every project sees approvals from all projects, its own ranked first
             hits = store.query_memory('CVE-test', 'desc', 'high', project_id=self.a)
-            self.assertEqual([h['project_id'] for h in hits], [self.a])
-            self.assertEqual(store.query_memory('CVE-test', 'desc', 'high'), [])
+            self.assertEqual([h['project_id'] for h in hits], [self.a, self.b])
+            self.assertEqual([h['same_project'] for h in hits], [True, False])
+            hits = store.query_memory('CVE-test', 'desc', 'high', project_id=self.b)
+            self.assertEqual([h['project_id'] for h in hits], [self.b, self.a])
+            self.assertEqual(hits[1]['image_ref'], 'img:1')
+        # dashboard stats still only count decisions of projects the user can access
         self.assertEqual(self.client.get('/stats', headers=self.users['ADMIN'][1]).json()['ragDecisions'], 1)
 
     def test_legacy_generated_content_is_not_exposed(self):

@@ -71,6 +71,7 @@ def persist_decision(
     pkg: str = "",
     remediation: str = "",
     run_id: str = "",
+    image_ref: str = "",
 ) -> str:
     """Embed rationale and append to the JSON store. Returns record id."""
     embed_input = f"{cve_id} {severity} {rationale}"
@@ -89,6 +90,7 @@ def persist_decision(
         "pkg": pkg,
         "remediation": remediation,
         "run_id": run_id,
+        "image_ref": image_ref,
         "published_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -111,10 +113,12 @@ def query_memory(
     project_id: str | None = None,
 ) -> list[dict]:
     """
-    Return top-k similar past decisions above the similarity threshold.
-    Each result: {cve_id, project_id, rationale, approver, decision, score}
+    Return top-k similar past decisions above the similarity threshold, from ALL projects.
+    `project_id` only ranks the caller's own approvals first.
+    Each result: {cve_id, project_id, rationale, approver, decision, same_project, score}
+    Records saved before project scoping existed (no `project_scoped` flag) are not searched.
     """
-    records = [r for r in _load() if project_id is not None and r.get("project_id") == project_id and r.get("project_scoped") and r.get("decision") == "approved"]
+    records = [r for r in _load() if r.get("project_scoped") and r.get("decision") == "approved"]
     if not records:
         return []
 
@@ -130,7 +134,7 @@ def query_memory(
         if score >= SIMILARITY_THRESHOLD:
             scored.append((score, r))
 
-    scored.sort(key=lambda x: x[0], reverse=True)
+    scored.sort(key=lambda x: (x[1].get("project_id") == project_id, x[0]), reverse=True)
 
     return [
         {
@@ -141,6 +145,8 @@ def query_memory(
             "decision": r["decision"],
             "remediation": r.get("remediation", ""),
             "published_at": r.get("published_at", ""),
+            "image_ref": r.get("image_ref", ""),
+            "same_project": r.get("project_id") == project_id,
             "score": round(score * 100),
         }
         for score, r in scored[:top_k]

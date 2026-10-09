@@ -25,7 +25,7 @@ import urllib.request
 from agent.state import AgentState, AgentStep
 from rag.store import query_memory
 from agent import progress
-from db.baselines import references, project_approvals
+from db.baselines import references, past_approvals, project_name
 
 logger = logging.getLogger("control_tower")
 
@@ -93,13 +93,48 @@ def _rad_generate_sync(prompt: str, max_tokens: int = 300) -> str:
 
 # ── Prompt builder ─────────────────────────────────────────────────────────
 
+_BASELINE_LABEL = "Shared Cyber Manager baseline"
+
+
+def _label(hit: dict) -> str:
+    """Readable project label for a memory hit (shared baselines keep their own label)."""
+    if hit.get("project_name"):
+        return hit["project_name"]
+    pid = hit.get("project_id") or ""
+    return pid if pid == _BASELINE_LABEL or not pid else project_name(pid)
+
+
+def _when(hit: dict) -> str:
+    day = (hit.get("published_at") or "")[:10]
+    return f" on {day}" if day else ""
+
+
+def _on_image(hit: dict) -> str:
+    return f" (image {hit['image_ref']})" if hit.get("image_ref") else ""
+
+
+def _memory_note(past: list[dict]) -> str:
+    """Reviewer-facing note: which projects approved this exact CVE + package before, and when."""
+    parts = []
+    for h in past:
+        if h.get("same_project"):
+            parts.append(f"This project has already approved this CVE{_when(h)} by {h['approver']}{_on_image(h)}.")
+        else:
+            parts.append(f"Project {_label(h)} has approved this CVE before{_when(h)}{_on_image(h)}.")
+    return " ".join(parts)
+
+
 def _build_prompt(cve: dict, hits: list[dict], project_id: str, cis_profile: str, environment_markdown: str = "") -> str:
     prior = ""
     if hits:
         top = hits[0]
+        scope = (
+            "this project" if top.get("same_project") or top.get("project_id") == project_id
+            else "a different project or shared baseline — assess independently for this project"
+        )
         prior = (
-            f"\n\nPRIOR DECISION (similarity {top['score']}% — project {top['project_id']}, "
-            f"approved by {top['approver']}):\n{top['rationale']}\nRemediation: {top.get('remediation', '')}"
+            f"\n\nPRIOR DECISION (similarity {top['score']}% — project {_label(top)}, "
+            f"approved by {top['approver']}; {scope}):\n{top['rationale']}\nRemediation: {top.get('remediation', '')}"
         )
 
     return f"""You are a cloud security architect at IBM. Assess the following container vulnerability finding and respond in EXACTLY this two-part format, with no extra commentary:
@@ -204,7 +239,8 @@ async def _synthesise_one(
         )
 
         published = references(cve["id"], cve["pkg"])
-        hits = project_approvals(project_id, cve["id"], cve["pkg"]) + hits
+        past = past_approvals(project_id, cve["id"], cve["pkg"])   # this CVE, approved in ANY project
+        hits = past + hits
         hits = [{**r, "project_id": "Shared Cyber Manager baseline", "score": 100,
                  "decision": "approved"} for r in published] + hits
         updated_cve = dict(cve)
@@ -212,12 +248,15 @@ async def _synthesise_one(
             top = hits[0]
             updated_cve["rag_match"] = {
                 "pct":      top["score"],
-                "project":  top["project_id"],
+                "project":  _label(top),
                 "approver": top["approver"],
-                "date":     top.get("published_at", ""),
+                "date":     (top.get("published_at") or "")[:10],
                 "summary": top["rationale"],
                 "remediation": top.get("remediation", ""),
                 "baselineId": top.get("id") if published else None,
+                "sameProject": bool(top.get("same_project")),
+                "image":    top.get("image_ref", ""),
+                "note":     _memory_note(past),
             }
 
         rag_chips = [{"label": "◈ query_memory", "variant": "rag"}]

@@ -808,7 +808,7 @@ def review_ai(run_id: str, req: ReviewAiRequest, user: dict = Depends(require_au
     with get_conn() as conn:
         row = conn.execute("SELECT markdown FROM scan_context WHERE run_id=?", (run_id,)).fetchone()
     environment_markdown = row[0] if row else ""
-    refs = baselines.references(req.cve_id, req.pkg) + baselines.project_approvals(run['project_id'], req.cve_id, req.pkg)
+    refs = baselines.references(req.cve_id, req.pkg) + baselines.past_approvals(run['project_id'], req.cve_id, req.pkg)
     draft = {"justification": req.justification, "remediation": req.remediation, "notes": req.notes}
     return review_assist.generate_suggestions(cve, draft, environment_markdown, refs, req.mode)
 

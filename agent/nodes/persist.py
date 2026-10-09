@@ -38,6 +38,7 @@ def persist_node(state: AgentState) -> dict:
             approver=audit[0] if audit else "Historical reviewer (unrecorded)",
             decision="approved",
             pkg=cve["pkg"], remediation=cve.get("remediation", ""), run_id=state["run_id"],
+            image_ref=state.get("image_ref", ""),
         )
         persisted += 1
 

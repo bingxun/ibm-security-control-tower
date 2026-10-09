@@ -44,7 +44,7 @@ def query_memory_tool(
     session_token: str = "",
 ) -> list[dict]:
     """
-    Search the RAG memory store for past decisions similar to the given CVE.
+    Search the memory for past decisions similar to the given CVE, across all projects.
 
     Args:
         cve_id:      CVE identifier e.g. CVE-2024-3094
