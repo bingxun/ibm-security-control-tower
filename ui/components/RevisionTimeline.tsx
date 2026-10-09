@@ -27,6 +27,10 @@ export default function RevisionTimeline({ revisions }: { revisions: RevisionRec
         {revisions.map((r, i) => {
           const a = ACTION[r.action];
           const role = ROLE_LABELS[r.actor_role as UserRole] ?? r.actor_role;
+          // Show manual input on the event where it was added or changed, not repeated on every event.
+          const notes = (r.manual_notes ?? "").trim();
+          const prevNotes = i > 0 ? (revisions[i - 1].manual_notes ?? "").trim() : "";
+          const showNotes = notes.length > 0 && notes !== prevNotes;
           return (
             <div key={i} className="flex gap-3">
               <div className="flex flex-col items-center flex-shrink-0">
@@ -54,6 +58,16 @@ export default function RevisionTimeline({ revisions }: { revisions: RevisionRec
                   <p className="text-[11px] mt-1 leading-relaxed break-words line-clamp-3" style={{ color: "var(--muted)" }}>
                     {r.justification}
                   </p>
+                )}
+                {showNotes && (
+                  <div className="mt-1.5 pl-3" style={{ borderLeft: "2px solid var(--accent-blue)" }}>
+                    <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--accent-blue)" }}>
+                      Manual input
+                    </div>
+                    <p className="text-[12px] leading-relaxed break-words whitespace-pre-wrap" style={{ color: "var(--body)" }}>
+                      {notes}
+                    </p>
+                  </div>
                 )}
                 {r.ai_suggestions_applied.length > 0 && (
                   <span className="inline-block text-[10px] mt-1 px-2 py-0.5 rounded-full"

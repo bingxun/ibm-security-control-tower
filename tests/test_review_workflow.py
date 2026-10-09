@@ -104,6 +104,13 @@ class ReviewWorkflowTests(unittest.TestCase):
         self.assertEqual(db.get_run('a')['status'],'completed')
         self.assertEqual(self.decide().status_code,409)
 
+    def test_revision_history_carries_manual_input(self):
+        self.assertEqual(self.decide(decision='submitted',role='DEVOPS_ENGINEER',notes='Checked with the platform team').status_code,200)
+        self.assertEqual(self.decide(role='CYBER_MANAGER',notes='Agreed, ticket opened').status_code,200)
+        history=self.client.get('/run/a/revisions',headers=self.auth['CYBER_MANAGER'],params={'cve_id':'CVE-2024-1','pkg':'lib'}).json()
+        self.assertEqual([h['action'] for h in history],['submitted','approved'])
+        self.assertEqual([h['manual_notes'] for h in history],['Checked with the platform team','Agreed, ticket opened'])
+
     def test_invalid_and_ambiguous_targets_do_not_change_other_findings(self):
         self.assertEqual(self.decide(pkg='missing').status_code,404)
         response=self.client.post('/run/a/decision',headers=self.super,json={'cve_id':'CVE-2024-1','decision':'approved'})
