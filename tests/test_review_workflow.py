@@ -16,6 +16,39 @@ from agent.nodes.synthesis import _synthesise_one, _build_prompt
 from langgraph.types import Command
 
 
+# Sample Trivy JSON used only to drive the pipeline in tests — kept here (not in
+# production code) so the shipping product carries no demo/fake findings.
+DEMO_TRIVY = {
+    "Results": [
+        {
+            "Target": "demo-image:latest",
+            "Vulnerabilities": [
+                {
+                    "VulnerabilityID": "CVE-2024-3094",
+                    "PkgName": "xz-utils",
+                    "InstalledVersion": "5.6.0",
+                    "FixedVersion": "5.6.1",
+                    "Severity": "CRITICAL",
+                    "Title": "RCE — backdoor in build system",
+                    "Description": "Malicious code in xz-utils 5.6.0/5.6.1 could let an attacker break sshd authentication and gain remote access.",
+                    "CVSS": {"nvd": {"V3Score": 10.0, "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"}},
+                },
+                {
+                    "VulnerabilityID": "CVE-2024-2961",
+                    "PkgName": "glibc",
+                    "InstalledVersion": "2.35",
+                    "FixedVersion": "2.39",
+                    "Severity": "HIGH",
+                    "Title": "Heap buffer overflow in iconv",
+                    "Description": "A buffer overflow in glibc's iconv() can achieve code execution via PHP's iconv filter.",
+                    "CVSS": {"nvd": {"V3Score": 8.8, "V3Vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:H"}},
+                },
+            ],
+        }
+    ]
+}
+
+
 class ReviewWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -140,7 +173,7 @@ class ReviewWorkflowTests(unittest.TestCase):
 
     def test_real_pipeline_has_master_and_slave_steps_and_human_gate(self):
         graph=build_graph();config={'configurable':{'thread_id':'full-pipeline'}}
-        state=make_initial_state(api.DEMO_TRIVY,project_id=self.a,environment_markdown='# Private environment')
+        state=make_initial_state(DEMO_TRIVY,project_id=self.a,environment_markdown='# Private environment')
         list(graph.stream(state,config,stream_mode='values'))
         snapshot=graph.get_state(config)
         self.assertTrue(snapshot.next)
