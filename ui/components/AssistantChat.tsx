@@ -20,11 +20,22 @@ function runIdFromUrl(): string | undefined {
   return new URLSearchParams(window.location.search).get("run") ?? undefined;
 }
 
-const OPEN_KEY = "ct-chat-open";
-const MSGS_KEY = "ct-chat-msgs";
+// Storage keys are scoped per user id so one person's thread never surfaces for
+// another on a shared browser (e.g. after a logout → login as someone else).
+const openKeyFor = (uid: string) => `ct-chat-open:${uid}`;
+const msgsKeyFor = (uid: string) => `ct-chat-msgs:${uid}`;
 
+// Thin wrapper: gates on auth and keys the panel by user id, so switching
+// accounts remounts the panel with a fresh, correctly-scoped conversation.
 export default function AssistantChat() {
   const { user } = useAuth();
+  if (!user) return null;
+  return <ChatPanel key={user.id} userId={user.id} />;
+}
+
+function ChatPanel({ userId }: { userId: string }) {
+  const OPEN_KEY = openKeyFor(userId);
+  const MSGS_KEY = msgsKeyFor(userId);
   const [open, setOpen] = useState<boolean>(() => {
     try { return sessionStorage.getItem(OPEN_KEY) === "1"; } catch { return false; }
   });
@@ -44,10 +55,8 @@ export default function AssistantChat() {
   }, [messages, loading, open]);
 
   // Persist across navigation (component stays mounted in the layout) and reloads.
-  useEffect(() => { try { sessionStorage.setItem(OPEN_KEY, open ? "1" : "0"); } catch { /* ignore */ } }, [open]);
-  useEffect(() => { try { sessionStorage.setItem(MSGS_KEY, JSON.stringify(messages)); } catch { /* ignore */ } }, [messages]);
-
-  if (!user) return null;
+  useEffect(() => { try { sessionStorage.setItem(OPEN_KEY, open ? "1" : "0"); } catch { /* ignore */ } }, [OPEN_KEY, open]);
+  useEffect(() => { try { sessionStorage.setItem(MSGS_KEY, JSON.stringify(messages)); } catch { /* ignore */ } }, [MSGS_KEY, messages]);
 
   const send = async (text: string) => {
     const content = text.trim();
