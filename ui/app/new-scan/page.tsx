@@ -15,11 +15,13 @@ interface ScanForm {
   projectId: string;
   cloudProvider: string;
 
+  cisProfile: string;
   severities: ("critical" | "high" | "medium" | "low")[];
 }
 
 const REGISTRIES = ["docker.io", "ghcr.io", "icr.io", "quay.io", "custom"];
 const CLOUD_PROVIDERS = ["IBM Cloud", "AWS", "Azure", "GCP", "On-prem"];
+const POLICY_PROFILES = ["Cyber Manager Policy Baseline"];
 const SEVERITY_LEVELS = ["critical", "high", "medium", "low"] as const;
 
 // ── Micro-components ───────────────────────────────────────────────────────
@@ -172,6 +174,7 @@ function NewScanPageInner() {
     tag: "latest",
     projectId: "",
     cloudProvider: "IBM Cloud",
+    cisProfile: "Cyber Manager Policy Baseline",
     severities: ["critical", "high", "medium", "low"],   // all severities by default
   });
 
@@ -248,6 +251,7 @@ function NewScanPageInner() {
       const { run_id } = await startScan({
         imageRef: resolvedRef,
         projectId: form.projectId,
+        cisProfile: form.cisProfile,
         environmentMarkdown,
         // lowest picked level kept for older API consumers; `severities` is what the backend filters on
         severityThreshold: SEVERITY_LEVELS.filter((x) => form.severities.includes(x)).pop() ?? "high",
@@ -414,6 +418,29 @@ function NewScanPageInner() {
             </div>
           </SectionCard>
 
+
+          {/* ── Policy ── */}
+          <SectionCard
+            icon={
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-yellow)" strokeWidth="2">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+            }
+            title="Cyber Manager Policy Baseline"
+            subtitle="Policy baseline applied to validate controls"
+          >
+            <div className="flex flex-col gap-4">
+              <div>
+                <Label>Policy</Label>
+                <Select
+                  value={form.cisProfile}
+                  onChange={(v) => set("cisProfile", v)}
+                  options={POLICY_PROFILES}
+                  disabled={launching}
+                />
+              </div>
+            </div>
+          </SectionCard>
 
           <SectionCard icon={<span aria-hidden="true">▤</span>} title="Environment & infrastructure" subtitle="Upload Markdown describing deployment, network exposure and security controls (maximum 100 KB).">
             <label className="flex flex-col gap-3 text-[13px]">
