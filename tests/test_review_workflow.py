@@ -123,9 +123,29 @@ class ReviewWorkflowTests(unittest.TestCase):
     def test_csv_foreign_project_and_unauthorized_import(self):
         rows=self.report();rows[0]['Run ID']='b';rows[0]['Status']='approved'
         self.assertEqual(self.upload(rows).status_code,404)
-        self.assertEqual(self.upload(self.report(),'ADMIN').status_code,403)
+        # Every role may upload; what changes is decided per row by the role's own limits.
+        self.assertEqual(self.upload(self.report(),'ADMIN').json(),{'updated':0,'unchanged':2})
+        reject=self.report();reject[0]['Status']='rejected'
+        self.assertEqual(self.upload(reject,'ADMIN').status_code,403)            # Admin cannot reject
+        approve=self.report();approve[0]['Status']='approved'
+        self.assertEqual(self.upload(approve,'DEVOPS_ENGINEER').status_code,403) # DevOps cannot approve
+        self.assertTrue(all(c['status']=='pending' for c in db.get_cves('a')))
         self.assertEqual(self.client.get(f'/projects/{self.b}/report',headers=self.auth['CYBER_MANAGER']).status_code,404)
         self.assertEqual(self.client.get('/run/b/report',headers=self.auth['CYBER_MANAGER']).status_code,404)
+
+    def test_every_role_can_upload_within_its_own_limits(self):
+        def fill(status):
+            rows=self.report()
+            for row in rows: row.update(Status=status,Justification='Checked network exposure',Remediation='Upgrade to 2')
+            return rows
+        # DevOps: can submit findings for approval through the CSV...
+        self.assertEqual(self.upload(fill('submitted'),'DEVOPS_ENGINEER').json(),{'updated':2,'unchanged':0})
+        self.assertTrue(all(c['status']=='submitted' for c in db.get_cves('a')))
+        # ...but an Admin cannot decide submitted findings (Cyber only)
+        self.assertEqual(self.upload(fill('approved'),'ADMIN').status_code,403)
+        # Cyber Manager approves them
+        self.assertEqual(self.upload(fill('approved'),'CYBER_MANAGER').json(),{'updated':2,'unchanged':0})
+        self.assertTrue(all(c['status']=='approved' for c in db.get_cves('a')))
 
     def test_project_export_includes_all_runs_and_pending_individual_report(self):
         for i in range(51): self.seed_run('extra-'+str(i),self.a)
