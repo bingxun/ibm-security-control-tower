@@ -66,6 +66,41 @@ def project_approvals(project_id, cve_id, pkg):
     return [{**dict(r),'project_id':project_id,'score':100,'decision':'approved'} for r in rows]
 
 
+def project_name(project_id):
+    """Readable project name for display (falls back to the id)."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT name FROM projects WHERE id=?", (project_id,)).fetchone()
+    return row[0] if row else project_id
+
+
+def past_approvals(project_id, cve_id, pkg, limit=5):
+    """Durable approvals of this CVE + package from ALL projects (memory is shared across projects).
+
+    The calling project's own approval comes first, then the most recent from other projects;
+    at most one per project. Runs that predate project scoping are excluded.
+    """
+    with get_conn() as conn:
+        rows = conn.execute("""SELECT c.rationale,c.remediation,
+                COALESCE(a.reviewer,'Historical reviewer (unrecorded)') AS approver,
+                COALESCE(a.reviewed_at,r.finished_at,'') AS published_at,
+                r.project_id AS project_id, COALESCE(p.name, r.project_id) AS project_name, r.image_ref AS image_ref
+            FROM cves c JOIN runs r ON r.run_id=c.run_id
+            LEFT JOIN projects p ON p.id=r.project_id
+            LEFT JOIN review_audit a ON a.run_id=c.run_id AND a.cve_id=c.id AND a.pkg=c.pkg AND a.decision='approved'
+            WHERE r.project_scoped=1 AND c.id=? AND c.pkg=? AND c.status='approved'
+            ORDER BY (r.project_id=?) DESC, a.id DESC""", (cve_id, pkg, project_id)).fetchall()
+    seen, result = set(), []
+    for r in rows:
+        if r['project_id'] in seen:
+            continue
+        seen.add(r['project_id'])
+        result.append({**dict(r), 'same_project': r['project_id'] == project_id,
+                       'score': 100, 'decision': 'approved'})
+        if len(result) >= limit:
+            break
+    return result
+
+
 def record_revision(run_id, cve_id, pkg, action, actor, actor_role,
                     justification='', remediation='', manual_notes='',
                     review_comment='', requested_changes='', ai_suggestions_applied=None):

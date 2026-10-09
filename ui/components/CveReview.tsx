@@ -222,9 +222,15 @@ export default function CveReview({
                 Agent recommends approval · {memoryRecommendation.pct}% memory match
               </div>
               <div className="text-[12px] mt-0.5" style={{ color: "var(--subtle)" }}>
-                A similar finding was approved by <span style={{ color: "var(--body)" }}>{memoryRecommendation.approver}</span>
-                {memoryRecommendation.date ? <> on {memoryRecommendation.date}</> : null}
-                {memoryRecommendation.project ? <> ({memoryRecommendation.project})</> : null}.
+                {memoryRecommendation.note ? (
+                  <span style={{ color: "var(--body)" }}>{memoryRecommendation.note}</span>
+                ) : (
+                  <>
+                    A similar finding was approved by <span style={{ color: "var(--body)" }}>{memoryRecommendation.approver}</span>
+                    {memoryRecommendation.date ? <> on {memoryRecommendation.date}</> : null}
+                    {memoryRecommendation.project ? <> ({memoryRecommendation.project})</> : null}.
+                  </>
+                )}
               </div>
             </div>
             {canApprove && !isSubmitted && !editable && (

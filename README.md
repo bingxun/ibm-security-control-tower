@@ -149,7 +149,7 @@ Sign in as Super Admin, open **Settings → Projects**, create projects as neede
 **Assign users**, and save assignments. Create accounts in **Users & Roles** first.
 New Scan only offers accessible projects; the dashboard can filter accessible projects.
 
-Private RAG lookup is restricted to the current project. Explicitly published Cyber Manager baselines are shared references across projects. Historical generated rationale and logs may
+Approved decisions are remembered across all projects: a finding that any project approved (same CVE and package) is shown as a memory reference in every other project's scan, with the project, approver, date and image. It never auto-approves, and each project still reviews its own findings. Published Cyber Manager baselines are an additional, explicit shared reference. Historical generated rationale and logs may
 contain cross-project context, so pre-migration generated content is visible only to Super Admin.
 Raw historical findings remain available to assigned users; run a new scan for isolated analysis.
 MCP memory tools require a valid `session_token` and project access; they no longer provide

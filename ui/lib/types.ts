@@ -141,6 +141,9 @@ export interface CveRecord {
     summary: string;
     remediation?: string;
     baselineId?: string;
+    sameProject?: boolean;
+    image?: string;
+    note?: string;
   };
   status: CveStatus;
 }
